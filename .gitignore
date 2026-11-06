@@ -1,0 +1,18 @@
+.DS_Store
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/local.properties
+**/build/
+artifacts/*.apk
+artifacts/*.zip
+
+# Local credentials and generated verification output
+artifacts/
+local.properties
+.env
+.env.*
+*.jks
+*.keystore
+*.apk
+*.aab

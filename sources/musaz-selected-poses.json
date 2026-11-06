@@ -1,0 +1,57 @@
+{
+  "app": "H1-score",
+  "team": "무사즈",
+  "mascot": "MUSAZ",
+  "selected_on": "2026-11-05",
+  "format": "Raster concept renders; not rigged 3D models or separate animation frames",
+  "wardrobe": "White and mint fitted safety hard hat, navy HYUNDAI T-shirt with no chest badge or sash",
+  "poses": [
+    {
+      "id": "guide",
+      "label_ko": "안내",
+      "file": "../mascots/musaz-01-03-guide-stop-thumbs-up.png",
+      "position": "large left"
+    },
+    {
+      "id": "stop",
+      "label_ko": "멈춤",
+      "file": "../mascots/musaz-01-03-guide-stop-thumbs-up.png",
+      "position": "upper right"
+    },
+    {
+      "id": "thumbs_up",
+      "label_ko": "엄지척",
+      "file": "../mascots/musaz-01-03-guide-stop-thumbs-up.png",
+      "position": "lower right"
+    },
+    {
+      "id": "achievement",
+      "label_ko": "금색 배지 축하",
+      "file": "../mascots/musaz-04-achievement.png",
+      "position": "single full-body mascot",
+      "accessory": "gold checkmark shield held in hand"
+    }
+  ],
+  "updated_on": "2026-11-05",
+  "usage_rule": "Gold shield mascot appears only in a newly earned badge reveal. Never on normal home, score result, or collection.",
+  "expressions": [
+    {
+      "id": "encourage",
+      "file": "../mascots/musaz-encourage.png",
+      "transparent_background": true,
+      "sha256": "4b2058ed4229270b27a4147af5f5818091db56fb9e5008add6b5ad7a87bd57f7"
+    },
+    {
+      "id": "celebrate",
+      "file": "../mascots/musaz-celebrate.png",
+      "transparent_background": true,
+      "sha256": "1016eb9b8bb7160ccf4ea804773b0ec56a53ab9f380c25695af26ad61d274361"
+    },
+    {
+      "id": "sad",
+      "file": "../mascots/musaz-sad.png",
+      "transparent_background": true,
+      "sha256": "31f315af9f1906d1be247c4dff43e92899eb4f7b3a2d318cb583134dd0253ef3"
+    }
+  ]
+}
