@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,8 @@ import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.musaz.h1score.core.*
+import java.time.Instant
+import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -70,29 +73,41 @@ private val Gold=H1Style.Gold
             Phase.RECORDING -> "주행 기록 중"
             Phase.AWAITING_PARK -> "주차 후 결과 공개"
             Phase.CANCELLED -> "기록 종료"
+            Phase.DISQUALIFIED -> "실격 · 기록 종료"
             Phase.FINISHED -> "기록 완료"
             else -> "이번 목적지"
         },PaleMint,Green)
         Text(vm.destinationName,color=Color.White,fontSize=19.sp,modifier=Modifier.padding(top=14.dp))
-        if (vm.demo || vm.hasLiveRoute || vm.phase == Phase.AWAITING_PARK) {
+        if (vm.demo || vm.consoleTest || vm.hasLiveRoute || vm.phase == Phase.AWAITING_PARK) {
             val km = if (vm.activeJourney) vm.remainingM / 1000 else vm.distanceKm
             Text("${"%.1f".format(km)} km 남음",color=Color.White,fontSize=34.sp,modifier=Modifier.padding(top=6.dp))
         }
-        Text(if (waiting) "마지막 10km부터 자동 기록" else if (vm.activeJourney) "순위와 보상은 주차 후 확인" else vm.participantLabel,
+        Text(if (vm.consoleTest) "콘솔 실제 차속 · 시험 제한속도 ${vm.consoleSessionLimitKph}km/h" else if (waiting) "마지막 10km부터 자동 기록" else if (vm.activeJourney) "순위와 보상은 주차 후 확인" else vm.participantLabel,
             color=Color(0xFFB7C7D8),fontSize=14.sp,modifier=Modifier.padding(top=8.dp))
         if (vm.parked) {
             Spacer(Modifier.height(14.dp))
+            if (vm.consoleTest && vm.activeJourney) {
+                Text("급가속 ${vm.progressReport.accelerationEvents}건 · 급감속 ${vm.progressReport.decelerationEvents}건",color=Mint,fontSize=14.sp)
+                Text("누적 가점 +%.3f점 · 시험 계산 %.3f점".format(vm.progressReport.earnedPoints,vm.progressReport.totalPoints),color=Color.White,fontSize=13.sp)
+            }
             when {
+                vm.consoleTest && vm.activeJourney -> Button(onClick=vm::finishConsoleTest) { Text("시험 종료 · 결과 보기") }
                 vm.demo && vm.activeJourney -> Button(onClick=vm::runDemo) { Text("시연 주행 재생") }
                 !vm.activeJourney && !vm.demo && vm.hasLiveRoute -> {
                     var invite by remember { mutableStateOf(false) }
                     Button(onClick={invite=true}) { Text("참가 예약") }
-                    if (invite) AlertDialog(onDismissRequest={invite=false},title={Text("이번 드라이브 참가")},
-                        text={Text("속도와 제한속도를 기록하고, 도착 후 주차하면 결과를 확인할 수 있어요.")},
-                        confirmButton={TextButton(onClick={invite=false;vm.accept()}) { Text("동의하고 참가 예약") }},
-                        dismissButton={TextButton(onClick={invite=false}) { Text("닫기") }})
+                    if (invite) Modal("이번 드라이브 참가", vm.destinationName, { invite=false }) {
+                        RoundConsent(vm, "참가 예약", vm.destinationInHangangGroup && vm.live.beltConditionMet) {
+                            invite=false
+                            vm.accept(it)
+                        }
+                    }
                 }
                 !vm.activeJourney -> TextButton(onClick=vm::openBuiltInNavigation) { Text("내장 내비에서 검색",color=Mint) }
+            }
+            if (vm.consoleTestAvailable && !vm.activeJourney) {
+                Text("콘솔 시험: 실제 차속, 제한속도 ${vm.consoleLimitKph}km/h·벨트 착용 가정. 보상 제외.",color=Color(0xFFB7C7D8),fontSize=12.sp,modifier=Modifier.padding(top=12.dp))
+                Button(onClick=vm::startConsoleTest) { Text("콘솔 입력 테스트 시작") }
             }
         }
         vm.notice?.let { Text(it,color=Mint,fontSize=13.sp,modifier=Modifier.padding(top=10.dp)) }
@@ -129,7 +144,7 @@ private val Gold=H1Style.Gold
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
                 Spacer(Modifier.width(18.dp))
                 Surface(onClick={ if(vm.parked) simulator=true },enabled=vm.parked,color=if(vm.demo) Color(0xFFF1EBE0) else PaleMint,shape=RoundedCornerShape(20.dp)) {
-                    Text(if(vm.demo) "●  시연 모드" else "●  Pleos 연결",Modifier.padding(horizontal=14.dp,vertical=9.dp),fontSize=12.sp,color=if(vm.demo) Color(0xFF846B40) else Green,fontWeight=FontWeight.SemiBold)
+                    Text(when { vm.consoleTest -> "●  콘솔 테스트"; vm.demo -> "●  시연 모드"; else -> "●  Pleos 연결" },Modifier.padding(horizontal=14.dp,vertical=9.dp),fontSize=12.sp,color=if(vm.demo) Color(0xFF846B40) else Green,fontWeight=FontWeight.SemiBold)
                 }
             }
             AnimatedContent(targetState=display,modifier=Modifier.weight(1f),transitionSpec={ (fadeIn(tween(220))+slideInHorizontally { it/25 }) togetherWith fadeOut(tween(120)) },label="screen") { screen ->
@@ -146,7 +161,7 @@ private val Gold=H1Style.Gold
             Row(Modifier.fillMaxWidth().height(39.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("무사즈가 함께하는 좋은 운전 습관",fontSize=11.sp,color=Muted)
                 Spacer(Modifier.weight(1f))
-                Text(if(vm.demo) "PROTOTYPE  ·  주행·참가자·보상은 시연 데이터" else "PLEOS LIVE  ·  차량 데이터 수신 확인용",fontSize=10.sp,color=Muted,letterSpacing=.3.sp)
+                Text(when { vm.consoleTest -> "CONSOLE TEST  ·  실제 차속 / 시험 조건 / 보상 제외"; vm.demo -> "PROTOTYPE  ·  주행·참가자·보상은 시연 데이터"; else -> "PLEOS LIVE  ·  차량 데이터 수신 확인용" },fontSize=10.sp,color=Muted,letterSpacing=.3.sp)
             }
         }
     }
@@ -160,11 +175,27 @@ private val Gold=H1Style.Gold
                 }
             }
         }
-        Primary("선택한 장소로 시연 예약") { destinations=false; vm.accept() }
+        RoundConsent(vm, "선택한 장소로 시연 예약", true) {
+            destinations=false
+            vm.accept(it)
+        }
     }
     if(simulator && vm.parked) Modal("프로토타입 제어", "사용자 화면과 개발 확인을 분리했어요",{simulator=false}) {
         Text("시연 모드는 가상의 목적지·주행·참가자 데이터를 사용합니다. Pleos 연결 모드는 실제 SDK 수신값만 표시합니다.",color=Muted,fontSize=16.sp,lineHeight=25.sp)
         Spacer(Modifier.height(22.dp))
+        if(vm.consoleTestAvailable && !vm.activeJourney) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(PaleMint).padding(16.dp)) {
+                Text("Virtual Console 입력 테스트",fontSize=17.sp,fontWeight=FontWeight.Bold,color=Green)
+                Text("차속·브레이크는 실제 SDK 입력입니다. 제한속도와 벨트 착용은 아래 시험 조건을 사용해요. 내비·참가 시간 없이 시작하며, 순위·마일리지·배지는 지급하지 않아요.",fontSize=12.sp,lineHeight=19.sp,color=Muted,modifier=Modifier.padding(top=8.dp))
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    listOf(50,80,100).forEach { limit ->
+                        FilterChip(selected=vm.consoleLimitKph==limit,onClick={vm.chooseConsoleLimit(limit)},label={Text("${limit}km/h")})
+                    }
+                }
+                Primary("콘솔 입력 테스트 시작",Icons.Outlined.Sensors) { simulator=false; vm.startConsoleTest() }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
         if(vm.demo && !vm.activeJourney) {
             TextButton(onClick={simulator=false;destinations=true}) { Text("시연 장소 선택") }
             Text("다음 시연의 결과 표정",fontSize=14.sp,fontWeight=FontWeight.Bold)
@@ -242,8 +273,8 @@ private val Gold=H1Style.Gold
         it.length >= 2 && listOf("여의도한강공원", "서울영등포구여의동로330").any { name -> it in name }
     }
     val matches = query.isBlank() || searchMatch != null
-    // The demo challenge closes tonight in Seoul.
-    val deadlineLabel = "D-DAY"
+    val now = rememberChallengeTime()
+    val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
     val participantCount = demoDestinations.first { it.name == "여의도한강공원" }.demoPeers
     Box(modifier.clipToBounds()) {
         if (showKakao) KakaoChallengeMap(participantCount, deadlineLabel, matches, searchMatch, { kakaoMap=it }, {
@@ -344,12 +375,58 @@ private val Gold=H1Style.Gold
             }
             Spacer(Modifier.height(8.dp))
         }
-        Primary(if(vm.demo) "참가 예약" else "동의하고 내비 시작",enabled=!beltRequired) {
+        if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
+            Text("현재 내비 목적지도 한강 챌린지 반경에 포함돼요.", color=Green)
+        }
+        RoundConsent(vm, if(vm.demo) "참가 예약 · 내비 시작" else "동의하고 내비 시작", !beltRequired,
+            if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
+                { round -> confirm=false; vm.accept(round) }
+            } else null) {
             confirm=false
-            vm.joinMapChallenge()
+            vm.joinMapChallenge(it)
         }
     }
 
+}
+
+@Composable private fun rememberChallengeTime(): Instant {
+    var now by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now = Instant.now()
+        }
+    }
+    return now
+}
+
+@Composable private fun RoundConsent(
+    vm: ChallengeViewModel,
+    action: String,
+    enabled: Boolean,
+    keepRoute: ((ChallengeRound) -> Unit)? = null,
+    onJoin: (ChallengeRound) -> Unit,
+) {
+    val now = rememberChallengeTime()
+    val round = ChallengeRound.currentOrNext(now)
+    var consent by remember(round) { mutableStateOf(false) }
+    val open = round.contains(now)
+    Text("${round.name} 챌린지 · ${round.hoursLabel} (한국 시간)", color=Ink, fontWeight=FontWeight.Bold)
+    Text("중간에 참가해도 마감은 ${round.closingLabel}예요. 마감 시각 전에 도착하지 못하면 순위와 마일리지 대상에서 제외돼요.",
+        color=Ink, modifier=Modifier.padding(top=8.dp))
+    Text("같은 회차에 챌린지 장소에서 직선거리 1km 이내를 목적지로 설정한 참가자끼리 비교해요.",
+        color=Muted, modifier=Modifier.padding(top=6.dp))
+    if (!open) Text(if (vm.demo) "시연은 다음 회차 시작 시각부터 재현해요." else "다음 회차 시작 전이에요.", color=Green)
+    Row(Modifier.fillMaxWidth().toggleable(value=consent, role=androidx.compose.ui.semantics.Role.Checkbox,
+        onValueChange={consent=it}), verticalAlignment=Alignment.CenterVertically) {
+        Checkbox(consent, onCheckedChange=null, modifier=Modifier.padding(12.dp))
+        Text("마감 및 참가 조건에 동의합니다", color=Ink)
+    }
+    val canSubmit = enabled && consent && (open || vm.demo)
+    Primary(action, enabled=canSubmit) { onJoin(round) }
+    if (keepRoute != null) OutlinedButton(onClick={keepRoute(round)}, enabled=canSubmit, modifier=Modifier.fillMaxWidth()) {
+        Text("현재 목적지로 참가")
+    }
 }
 
 @Composable private fun Journey(vm:ChallengeViewModel) {
@@ -367,8 +444,8 @@ private val Gold=H1Style.Gold
         }
         Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
-                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->"안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
-                Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";disqualified->"이번 점수·순위·보상은 지급하지 않아요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
+                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->"안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";vm.consoleTest && vm.parked->"콘솔 입력을\n기록하고 있어요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
+                Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";disqualified->"이번 점수·순위·보상은 지급하지 않아요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";vm.consoleTest->"콘솔에서 D → ACCEL / BRAKE\n정지 후 P단에서 시험을 종료해 주세요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
                 Spacer(Modifier.height(35.dp))
                 Row(verticalAlignment=Alignment.Bottom) {
                     Text("%.1f".format(vm.remainingM/1000),color=Color.White,fontSize=66.sp,fontWeight=FontWeight.Light,letterSpacing=(-3).sp)
@@ -377,16 +454,23 @@ private val Gold=H1Style.Gold
             }
             Box(Modifier.weight(1f).fillMaxHeight(),contentAlignment=Alignment.Center) { RouteArt(if(waiting) 0f else (1-vm.remainingM/10000).toFloat().coerceIn(0f,1f)) }
         }
-        Text(if(cancelled) "점수·보상 지급 제외" else "기본 60점 · 현재 누적 가점 +%.1f점 / 40점".format(vm.progressReport.earnedPoints) + " · 회전 −%.1f점".format(vm.progressReport.turnPenalty),
-            color=Mint,fontSize=16.sp,modifier=Modifier.padding(bottom=10.dp))
+        if (!vm.consoleTest || vm.parked) {
+            Text(if(cancelled) "점수·보상 지급 제외" else if(vm.consoleTest)
+                "급가속 ${vm.progressReport.accelerationEvents}건 · 급감속 ${vm.progressReport.decelerationEvents}건 · 누적 가점 +%.3f점".format(vm.progressReport.earnedPoints)
+                else "기본 60점 · 현재 누적 가점 +%.1f점 / 40점".format(vm.progressReport.earnedPoints) + " · 회전 −%.1f점".format(vm.progressReport.turnPenalty),
+                color=Mint,fontSize=16.sp,modifier=Modifier.padding(bottom=10.dp))
+            if(vm.consoleTest) Text("시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 속도 +%.3f / 가감속 +%.3f · %.1fHz".format(vm.progressReport.speedPoints,vm.progressReport.accelerationPoints,vm.progressReport.longitudinalSampleRateHz),
+                color=Color(0xFFAFBDCC),fontSize=12.sp,modifier=Modifier.padding(bottom=8.dp))
+        }
         Text("1km마다 제한속도 준수 최대 +2.5점 · 부드러운 가감속 최대 +1.5점",color=Color(0xFFAFBDCC),fontSize=12.sp,modifier=Modifier.padding(bottom=12.dp))
         LinearProgressIndicator(progress={if(waiting) 0f else (1-vm.remainingM/10000).toFloat().coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),color=Mint,trackColor=Color(0xFF304765))
         Row(Modifier.fillMaxWidth().padding(top=17.dp),verticalAlignment=Alignment.CenterVertically) {
-            Text(if(waiting) "기록 시작까지 ${"%.1f".format(((vm.remainingM-10000)/1000).coerceAtLeast(0.0))} km" else if(arrived) "결과 공개 대기" else "안전한 곳까지 평소처럼 운전해 주세요",color=Color(0xFFAFBDCC),fontSize=13.sp)
+            Text(if(vm.consoleTest) "시험 기록 · 최대 10km · 보상 제외" else if(waiting) "기록 시작까지 ${"%.1f".format(((vm.remainingM-10000)/1000).coerceAtLeast(0.0))} km" else if(arrived) "결과 공개 대기" else "안전한 곳까지 평소처럼 운전해 주세요",color=Color(0xFFAFBDCC),fontSize=13.sp)
             Spacer(Modifier.weight(1f))
             if(vm.parked && vm.activeJourney) {
                 TextButton(onClick=vm::cancel) { Text("참가 취소",color=Color(0xFFAFBDCC)) }
-                if(vm.demo) Button(onClick=vm::runDemo,shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.buttonColors(containerColor=Mint,contentColor=Ink)) { Text("시연 주행 재생  →",fontWeight=FontWeight.Bold) }
+                if(vm.consoleTest) Button(onClick=vm::finishConsoleTest,colors=ButtonDefaults.buttonColors(containerColor=Mint,contentColor=Ink)) { Text("시험 종료 · 결과 보기") }
+                else if(vm.demo) Button(onClick=vm::runDemo,shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.buttonColors(containerColor=Mint,contentColor=Ink)) { Text("시연 주행 재생  →",fontWeight=FontWeight.Bold) }
                 else Button(onClick=vm::openBuiltInNavigation,colors=ButtonDefaults.buttonColors(containerColor=Mint,contentColor=Ink)) { Text("내장 내비로 돌아가기") }
             }
         }
@@ -396,6 +480,7 @@ private val Gold=H1Style.Gold
 @Composable private fun ResultScreen(vm:ChallengeViewModel,onBadge:()->Unit) {
     val report=vm.report
     if(report==null || !vm.resultUnlocked) { EmptyState("아직 기록이 없어요","챌린지에 참가하고 주차한 뒤 결과를 확인해 주세요.") { vm.navigate(Screen.HOME) }; return }
+    val consoleScoreConfirmed = report.score != null && report.validDistanceM >= 500
     var showKm by remember { mutableStateOf(false) }
     val mood=if(report.valid) DriveMood.forScore(report.score) else DriveMood.NEUTRAL
     val accent=if(mood==DriveMood.TEARY) Color(0xFFA8654C) else Green
@@ -404,6 +489,7 @@ private val Gold=H1Style.Gold
         title={Text("1km별 가점 · 시작 60점")},text={
             Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState())) {
                 Text("제한속도 준수 +2.5점/km · 부드러운 가감속 +1.5점/km")
+                if(vm.consoleTest) Text("시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정 · 실제 SDK 차속 사용")
                 report.kilometers.forEach { km ->
                     Text("\n${km.kilometer}km 구간 · %.0fm / 유효 %.0fm".format(km.distanceM,km.validDistanceM))
                     Text("속도 +%.2f · 가감속 +%.2f = +%.2f점".format(km.speedPoints,km.accelerationPoints,km.points))
@@ -418,7 +504,26 @@ private val Gold=H1Style.Gold
                     }}")
                 }
                 Text("위치·회전 안내·조향·신호가 충분히 확인된 회전만 감점합니다. 회전 미확인은 안전 확인을 뜻하지 않습니다.")
-                Text("\n가감속 가점은 제한속도 준수 구간에서만 지급합니다. 미수신 구간에는 가점이 없습니다.")
+                Text("\n급가속 ${report.accelerationEvents}건 · 급감속(급제동 포함) ${report.brakingEvents}건")
+                Text("가감속 자료 확보 %.1f%% · 실제 수신 %.1fHz · %s".format(report.longitudinalCoverage * 100,
+                    report.longitudinalSampleRateHz, if (report.longitudinalReady) "평가 가능" else "점수 확정 보류"))
+                Text("점수 확정에는 자료 %.0f%% 이상과 초당 %.0f회 이상 수신이 필요해요. 수신 빈도가 낮으면 자료 확보율이 100%%여도 점수를 보류해요."
+                    .format(LongitudinalRules.MIN_COVERAGE * 100, LongitudinalRules.MIN_SAMPLE_RATE_HZ))
+                Text("확정된 급가감속 구간의 가점만 제외합니다. 같은 사건의 브레이크 사용은 추가 감점하지 않습니다.")
+                if(vm.consoleTest) {
+                    Text("\n급가속: +2.5m/s² 이상 1초 지속 · 급감속: 최근 1초 평균 −3m/s² 이하")
+                    report.longitudinalEvents.forEachIndexed { index,event ->
+                        val label=if(event.kind==LongitudinalKind.ACCELERATION) "급가속" else "급감속"
+                        val peakLabel=if(event.kind==LongitudinalKind.ACCELERATION) "최대 필터 가속도" else "최저 1초 평균"
+                        val detectedSeconds=event.qualifyingIntervals.sumOf { it.durationNanos } / 1e9
+                        Text("\n${index+1}. $label · 검출 구간 합계 %.2f초".format(detectedSeconds))
+                        Text("$peakLabel %.2fm/s² · 브레이크 %s".format(event.peakAccelerationMps2,
+                            when(event.brakePressed) { true->"확인"; false->"미사용"; null->"미확인" }))
+                    }
+                    Text("\n시험 누적 계산 %.3f점 = 60 + 속도 %.3f + 가감속 %.3f".format(report.totalPoints,report.speedPoints,report.accelerationPoints))
+                    Text("최종 점수 확정에는 기존 조건인 유효 주행 500m 이상과 충분한 데이터가 필요합니다. 건당 추가 감점은 없습니다.")
+                }
+                Text("\n가감속 가점은 제한속도 준수 구간에서만 지급합니다. 미수신·판정 불가 구간에는 가점이 없습니다.")
             }
         })
     Column(Modifier.fillMaxSize()) {
@@ -430,36 +535,44 @@ private val Gold=H1Style.Gold
                 DriveMood.NEUTRAL->"무사히 도착했어요."
             },fontSize=29.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=8.dp)) }
             Spacer(Modifier.weight(1f))
-            Tag(if(report.valid) "기록 확인 완료" else "개인 기록",PaleMint,Green)
+            Tag(if(vm.consoleTest) "콘솔 시험 · 보상 제외" else if(vm.missedDeadline) "마감 이후 도착 · 순위 제외" else if(report.valid) "기록 확인 완료" else "개인 기록",PaleMint,Green)
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(20.dp)) {
             Column(Modifier.weight(.9f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) { Text("오늘의 주행습관 점수",color=Muted,fontSize=14.sp);Spacer(Modifier.weight(1f));Icon(Icons.Outlined.VerifiedUser,null,tint=Green,modifier=Modifier.size(20.dp)) }
                 Row(Modifier.weight(1f).fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-                    ScoreDial(report.score,accent,Modifier.size(140.dp))
+                    ScoreDial(if(vm.consoleTest && !consoleScoreConfirmed) null else report.score,accent,Modifier.size(140.dp))
                     ExpressionMascot(mood,Modifier.size(148.dp))
                 }
                 Surface(color=tone,shape=RoundedCornerShape(14.dp),modifier=Modifier.fillMaxWidth().padding(bottom=12.dp)) {
                     Text(when {
+                        vm.consoleTest -> "시험 누적 %.3f점 · %s".format(report.totalPoints,if(consoleScoreConfirmed) "시험 점수 확정" else "잠정 계산")
                         report.score==null->"자료가 모이면 함께 돌아볼게요."
                         report.compliance<85->"다음엔 제한속도를 조금 더 살펴봐요."
                         report.smoothness<85->"가속과 제동을 조금 더 부드럽게."
                         else->"차분하게 이어간 흐름, 다음에도 함께해요."
                     },Modifier.padding(10.dp),fontSize=12.sp,color=accent,lineHeight=19.sp)
                 }
-                if(report.score != null) MetricBar("제한속도 준수",report.compliance.roundToInt(),"+%.2f / 25점".format(report.speedPoints))
-                Spacer(Modifier.height(10.dp));if(report.score != null) MetricBar("부드러운 가감속",report.smoothness.roundToInt(),"+%.2f / 15점".format(report.accelerationPoints))
+                if(report.score != null || vm.consoleTest) MetricBar("제한속도 준수",report.compliance.roundToInt(),"+%.2f / 25점".format(report.speedPoints))
+                Spacer(Modifier.height(10.dp));if(report.score != null || vm.consoleTest) MetricBar("부드러운 가감속",report.smoothness.roundToInt(),"+%.2f / 15점".format(report.accelerationPoints))
                 Text("시작 60점 + 가점 %.2f − 회전 감점 %.1f점".format(report.earnedPoints,report.turnPenalty),fontSize=12.sp,color=Muted)
                 TextButton(onClick={showKm=true}) { Text("1km별 가점 보기") }
                 HorizontalDivider(Modifier.padding(vertical=10.dp),color=Line)
-                Row { SmallStat("유효 주행","%.1f km".format(report.validDistanceM/1000));Spacer(Modifier.weight(1f));SmallStat("데이터 수신","${(report.coverage*100).roundToInt()}%");Spacer(Modifier.weight(1f));SmallStat("급감속","${report.brakingEvents}회") }
+                Row { SmallStat("유효 주행","%.1f km".format(report.validDistanceM/1000));Spacer(Modifier.weight(1f));SmallStat("데이터 수신","${(report.coverage*100).roundToInt()}%");Spacer(Modifier.weight(1f));SmallStat("급가속 / 급감속","${report.accelerationEvents} / ${report.brakingEvents}건") }
+                Text("가감속 %.0f%% · %.1fHz · %s".format(report.longitudinalCoverage * 100, report.longitudinalSampleRateHz,
+                    when {
+                        report.longitudinalReady -> "급제동 포함"
+                        report.longitudinalSampleRateHz < LongitudinalRules.MIN_SAMPLE_RATE_HZ -> "빈도 부족 · 점수 보류"
+                        else -> "자료 부족 · 점수 보류"
+                    }),
+                    fontSize=10.sp,color=Muted,modifier=Modifier.padding(top=5.dp))
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) { Text("함께 도착한 무사즈",fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(vm.demo)Tag("시연 ${vm.ranking.size}인",Paper,Muted) }
-                Text(if(vm.demo) "같은 목적지 · 같은 접근 구간 · 같은 평가 버전" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=16.dp))
+                Text(if(vm.consoleTest) "실제 SDK 차속으로 점수 로직 시험" else if(vm.demo) "같은 회차 · 챌린지 반경 1km" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=16.dp))
                 if(vm.ranking.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) { Text(if(!vm.demo) "이번 기록은 개인 결과로 확인해요.\n실제 경쟁·보상은 서버 연결 후 제공해요." else "보상 순위에 필요한 거리·데이터\n조건을 채우지 못했어요.",textAlign=TextAlign.Center,lineHeight=26.sp,color=Muted) }
+                    Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) { Text(if(vm.consoleTest) "시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정\n급가감속 구간은 가감속 가점에서 제외해요.\n건당 추가 감점과 시험 보상은 없어요.\n\n유효 주행 500m 이상과 충분한 데이터가\n모이면 기존 기준으로 점수가 확정돼요." else if(!vm.demo) "이번 기록은 개인 결과로 확인해요.\n실제 경쟁·보상은 서버 연결 후 제공해요." else if(vm.missedDeadline) "마감 이후에 도착해 개인 기록만 표시해요." else "보상 순위에 필요한 거리·데이터\n조건을 채우지 못했어요.",textAlign=TextAlign.Center,lineHeight=26.sp,color=Muted) }
                 } else Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) { vm.ranking.forEach { row ->
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if(row.id=="나") PaleMint else Color.Transparent).padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
                         Text("%02d".format(row.rank),fontSize=15.sp,color=if(row.id=="나") Green else Muted,fontWeight=FontWeight.Bold,modifier=Modifier.width(40.dp))
@@ -485,7 +598,7 @@ private val Gold=H1Style.Gold
                 }
             }
         }
-        Text("시제품 평가 기준 · 순위 보상은 85점 이상 유효 기록에 적용 · 완료 보상 0M",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=12.dp,bottom=2.dp))
+        Text(if(vm.consoleTest) "에뮬레이터 시험 기록 · 제한속도·벨트는 시험 조건 · 순위·마일리지·배지 지급 없음" else "시제품 평가 기준 · 순위 보상은 85점 이상 유효 기록에 적용 · 완료 보상 0M",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=12.dp,bottom=2.dp))
     }
 }
 

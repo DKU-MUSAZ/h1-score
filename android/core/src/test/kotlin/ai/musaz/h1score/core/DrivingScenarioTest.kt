@@ -5,8 +5,8 @@ import kotlin.test.*
 
 class DrivingScenarioTest {
     @Test fun compliantAndSustainedSpeedingTripsProduceDifferentResults() {
-        val compliant = ScoreEngine.evaluate((0..750).map { Sample(it * 1_000L, 14.0, 60) })
-        val speeding = ScoreEngine.evaluate((0..750).map { Sample(it * 1_000L, 22.0, 60) })
+        val compliant = ScoreEngine.evaluate((0..7500).map { Sample(it * 100L, 14.0, 60) })
+        val speeding = ScoreEngine.evaluate((0..7500).map { Sample(it * 100L, 22.0, 60) })
 
         assertTrue(compliant.valid)
         assertEquals(100, compliant.score)
@@ -19,10 +19,11 @@ class DrivingScenarioTest {
     }
 
     @Test fun rapidAccelerationCostsPointsEvenBelowTheSpeedLimit() {
-        val samples = (0..800).map {
-            Sample(it * 1_000L, if (it % 4 < 2) 10.0 else 16.0, 60)
+        val trace = SpeedTrace(initialSpeedMps = 10.0, limitKph = 60)
+        repeat(200) {
+            trace.drive(1500, 3.0).drive(1500, -3.0).drive(2000)
         }
-        val result = ScoreEngine.evaluate(samples)
+        val result = ScoreEngine.evaluate(trace.samples)
 
         assertTrue(result.valid)
         assertEquals(100.0, result.compliance)

@@ -9,6 +9,7 @@ import ai.musaz.h1score.core.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.util.UUID
 
 data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
@@ -24,6 +25,9 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val connection = PleosConnection(app)
     var live by mutableStateOf(LiveVehicle()); private set
     var demo by mutableStateOf(false); private set
+    var consoleTest by mutableStateOf(false); private set
+    var consoleLimitKph by mutableIntStateOf(80); private set
+    var consoleSessionLimitKph by mutableIntStateOf(80); private set
     var screen by mutableStateOf(Screen.HOME); private set
     var selected by mutableStateOf(demoDestinations[0]); private set
     var session by mutableStateOf<ChallengeSession?>(null); private set
@@ -52,11 +56,31 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var routeRequestedAt = 0L
     private var routeTimeout: Job? = null
 
-    fun joinMapChallenge() {
-        if (!parked || activeJourney || awaitingMapRoute) return
+    private var activeRound: ChallengeRound? = null
+    private var liveArrivalAt: Instant? = null
+    private var demoRoundStart = Instant.EPOCH
+    private var demoStartedAt = 0L
+    var missedDeadline by mutableStateOf(false); private set
+    val destinationInHangangGroup get() = live.destinationPoint?.let(hangangVenue::includes) == true
+
+    private fun canJoinRound(round: ChallengeRound): Boolean {
+        if (demo || round.contains(Instant.now())) return true
+        notice = "현재 참가할 수 없는 시간이에요. 다음 회차를 확인해 주세요."
+        return false
+    }
+
+    fun joinMapChallenge(round: ChallengeRound = ChallengeRound.currentOrNext(Instant.now())) {
+        if (!parked || activeJourney || awaitingMapRoute || !canJoinRound(round)) return
         if (demo) {
             selectDestination(demoDestinations.first { it.name == "여의도한강공원" })
-            accept()
+            accept(round)
+            if (activeJourney) {
+                if (live.parked && connection.requestChallengeRoute()) {
+                    openBuiltInNavigation()
+                } else {
+                    notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
+                }
+            }
             return
         }
         if (!live.beltConditionMet) {
@@ -64,6 +88,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             return
         }
         if (!beginService()) return
+        activeRound = round
         routeRequestedAt = SystemClock.elapsedRealtime()
         awaitingMapRoute = true
         if (!connection.requestChallengeRoute()) {
@@ -109,7 +134,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             } else if (!connection.openNavigation(search = !activeJourney && !awaitingMapRoute)) {
                 error("No navigation launcher")
             }
-            if (demo) switchSource()
         }.onFailure { notice = "Pleos 하단의 내비 아이콘에서 목적지를 검색해 주세요" }
     }
     // Display fixtures only. The real destination is supplied by NaviHelper; counts are not live.
@@ -149,11 +173,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private val turnDetector=TurnDetector()
     private var lastTurnAt=0L
     private fun currentReport()=ScoreEngine.evaluate(samples,turnDetector.events)
-    private var lastSampleAt = 0L
+    private var lastReportAt = 0L
+    private var recordingStartedAtNanos: Long? = null
     private var uiVisible = false
     private val isEmulator = android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.HARDWARE in listOf("ranchu","goldfish")
+    val consoleTestAvailable get() = BuildConfig.DEBUG && isEmulator
     val parked get() = if (demo) !demoMoving && (live.parked || (isEmulator && live.gearPark == null && live.uxRestricted != true && (live.speedMps ?: 0.0) < .1)) else live.parked
-    val destinationName get() = if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
+    val destinationName get() = if(consoleTest) "콘솔 입력 테스트 · 시험 제한속도 ${consoleSessionLimitKph}km/h" else if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
     val distanceKm get() = if(demo) selected.distanceKm else (live.remainingM ?: 0.0)/1000
     val phase get() = session?.phase ?: Phase.IDLE
     val activeJourney get() = phase in listOf(Phase.RESERVED,Phase.RECORDING,Phase.AWAITING_PARK)
@@ -161,19 +187,116 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { connection.flow.collect { next -> receiveVehicle(next) } }
+        // Vehicle events use a separate buffered stream: UI StateFlow may conflate 10 Hz updates.
+        viewModelScope.launch { connection.samples.collect { sample -> receiveSample(sample) } }
     }
     // Explicit monotonic receipt time supports deterministic recorded-telemetry replay in tests.
     internal fun receiveVehicle(next: LiveVehicle, receivedAt: Long = SystemClock.elapsedRealtime()) {
-        live=next
+        live = next
+        // Console sessions have explicit test context; do not consume real navigation or
+        // belt events as if this were a live challenge. Actual park/UX gates still apply.
+        if (consoleTest && activeJourney) return
         if (!demo) {
             if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                next.destination?.filter(Char::isLetterOrDigit) == "여의도한강공원") {
-                awaitingMapRoute=false; routeTimeout?.cancel(); startSession()
+                destinationInHangangGroup && next.destinationId != null && !next.arrived) {
+                awaitingMapRoute = false
+                routeTimeout?.cancel()
+                startSession()
             }
-            consumeLive(next,receivedAt)
+            consumeLive(next, receivedAt)
         }
     }
-    fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
+
+    internal fun receiveSample(sample: Sample, receivedAt: Long = SystemClock.elapsedRealtime()) {
+        if (demo || phase != Phase.RECORDING) return
+        val startedAt = recordingStartedAtNanos ?: return
+        if (sample.speedTimestampNanos < startedAt) return
+        // Preserve original time, validity and all samples. Duplicate/out-of-order signals are
+        // intentionally retained so the detector can interrupt rather than bridge them.
+        samples += if (consoleTest) sample.copy(limitKph = consoleSessionLimitKph) else sample
+        if (receivedAt - lastReportAt >= 500) {
+            progressReport = currentReport()
+            if (consoleTest) {
+                remainingM = (ScoreEngine.MAX_DISTANCE_M - progressReport.kilometers.sumOf { it.distanceM }).coerceAtLeast(0.0)
+                logConsoleReport("recording", progressReport)
+            }
+            lastReportAt = receivedAt
+        }
+    }
+
+    fun chooseConsoleLimit(limitKph: Int) {
+        if (consoleTestAvailable && parked && !activeJourney && !awaitingMapRoute && limitKph in listOf(50, 80, 100))
+            consoleLimitKph = limitKph
+    }
+
+    fun startConsoleTest() {
+        if (!consoleTestAvailable || !live.parked || activeJourney || awaitingMapRoute) return
+        if (!beginService()) return
+        demoJob?.cancel()
+        demoRunning = false
+        demoMoving = false
+        demo = false
+        consoleTest = true
+        consoleSessionLimitKph = consoleLimitKph
+        activeRound = null
+        liveArrivalAt = null
+        missedDeadline = false
+        connection.drainPendingSamples()
+        samples.clear()
+        turnDetector.reset()
+        lastTurnAt = 0
+        lastReportAt = 0
+        report = null
+        progressReport = ScoreEngine.evaluate(emptyList())
+        ranking = emptyList()
+        earned = 0
+        pendingBadges = emptyList()
+        ownedBadges = prefs.getStringSet("badges-live", emptySet())?.toSet() ?: emptySet()
+        remainingM = ScoreEngine.MAX_DISTANCE_M
+        session = ChallengeSession(UUID.randomUUID().toString(), "debug-console", remainingM)
+            .accept(true).update(remainingM, false, true)
+        recordingStartedAtNanos = SystemClock.elapsedRealtimeNanos()
+        connection.setConsoleCapture(true)
+        screen = Screen.JOURNEY
+        notice = "콘솔 실제 차속 기록 시작 · 제한속도 ${consoleLimitKph}km/h·벨트 착용은 시험 가정"
+        logConsoleReport("started", progressReport)
+    }
+
+    fun finishConsoleTest() {
+        if (!consoleTestAvailable || !consoleTest || phase != Phase.RECORDING || !live.parked) return
+        drainRecordingSamples(SystemClock.elapsedRealtimeNanos())
+        val result = currentReport()
+        progressReport = result
+        report = result
+        remainingM = (ScoreEngine.MAX_DISTANCE_M - result.kilometers.sumOf { it.distanceM }).coerceAtLeast(0.0)
+        session = session?.update(0.0, true, true)
+        recordingStartedAtNanos = null
+        connection.setConsoleCapture(false)
+        ranking = emptyList()
+        earned = 0
+        pendingBadges = emptyList()
+        // Tests must never settle mileage, award badges, or increment completed trips.
+        screen = Screen.RESULT
+        logConsoleReport("finished", result)
+        endService()
+    }
+
+    private fun logConsoleReport(stage: String, result: ScoreReport) {
+        if (!consoleTestAvailable) return
+        android.util.Log.d("H1Console", java.lang.String.format(java.util.Locale.US,
+            "%s samples=%d distance=%.1fm accel=%d decel=%d speedBonus=%.4f smoothBonus=%.4f total=%.4f score=%s rate=%.2fHz coverage=%.1f%% limit=%d(test) belt=assumed",
+            stage, samples.size, result.kilometers.sumOf { it.distanceM }, result.accelerationEvents,
+            result.decelerationEvents, result.speedPoints, result.accelerationPoints, result.totalPoints,
+            result.score?.takeIf { result.validDistanceM >= 500 }?.toString() ?: "pending", result.longitudinalSampleRateHz,
+            result.longitudinalCoverage * 100, consoleSessionLimitKph))
+    }
+
+    private fun drainRecordingSamples(untilNanos: Long) {
+        for (sample in connection.drainPendingSamples()) {
+            if (sample.speedTimestampNanos <= untilNanos) receiveSample(sample)
+        }
+    }
+    fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
@@ -192,6 +315,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     fun switchSource() {
         if(activeJourney || awaitingMapRoute || !parked) return
         if(demo && !live.parked) { notice="실제 기기의 속도·P단·화면 제한을 먼저 확인해 주세요"; return }
+        connection.setConsoleCapture(false)
+        consoleTest = false
         demo=!demo
         pendingBadges=emptyList()
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
@@ -199,23 +324,48 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
     }
-    fun accept() {
-        if(!parked || awaitingMapRoute || activeJourney) return
+    fun accept(round: ChallengeRound = ChallengeRound.currentOrNext(Instant.now())) {
+        if(!parked || awaitingMapRoute || activeJourney || !canJoinRound(round)) return
+        if (!demo && !destinationInHangangGroup) {
+            notice = "내비 목적지가 챌린지 장소에서 1km 이내여야 해요."
+            return
+        }
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
         if(!demo && !live.beltConditionMet) { notice="운전석 벨트 상태를 확인한 뒤 참가해 주세요"; return }
         if(!beginService()) return
+        activeRound = round
+        demoRoundStart = maxOf(Instant.now(), round.opensAt)
+        demoStartedAt = SystemClock.elapsedRealtime()
         startSession()
     }
     private fun startSession() {
-        samples.clear(); turnDetector.reset();lastTurnAt=0; progressReport=ScoreEngine.evaluate(emptyList()); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
-        remainingM=distanceKm*1000
-        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM).accept(true)
-        screen=Screen.JOURNEY
+        connection.setConsoleCapture(false)
+        consoleTest = false
+        missedDeadline = false
+        liveArrivalAt = null
+        connection.drainPendingSamples()
+        samples.clear()
+        turnDetector.reset()
+        lastTurnAt = 0
+        lastReportAt = 0
+        progressReport = ScoreEngine.evaluate(emptyList())
+        report = null
+        ranking = emptyList()
+        earned = 0
+        pendingBadges = emptyList()
+        remainingM = distanceKm * 1000
+        session = ChallengeSession(UUID.randomUUID().toString(),
+            if (demo) selected.name else live.destinationId!!, remainingM).accept(true)
+        recordingStartedAtNanos = if (!demo && phase == Phase.RECORDING) SystemClock.elapsedRealtimeNanos() else null
+        screen = Screen.JOURNEY
     }
     fun cancel() {
         if(!parked) return
+        connection.setConsoleCapture(false)
+        consoleTest = false
+        recordingStartedAtNanos = null
         demoJob?.cancel(); demoRunning=false; session=null; report=null; remainingM=distanceKm*1000; screen=Screen.HOME; endService()
     }
     fun runDemo() {
@@ -230,60 +380,100 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                 session=session?.update(remainingM,false,false)
                 announceRecording(previous)
                 if(phase==Phase.RECORDING) {
-                    repeat(24) {
-                        // Accelerated replay: 24 one-second samples per UI tick.
+                    repeat(240) {
+                        // Accelerated replay: 24 seconds of 10 Hz telemetry per UI tick.
                         val i=fixtureIndex++
                         samples += demoDrive.sample(i)
                     }
                     progressReport=currentReport()
                 }
             }
+            val arrival = demoRoundStart.plusMillis(SystemClock.elapsedRealtime() - demoStartedAt)
             session=session?.update(0.0,true,false)
             delay(2200)
             demoMoving=false
             session=session?.update(0.0,true,true)
-            finish()
+            finish(arrival)
             demoRunning=false
         }
     }
     private fun consumeLive(v: LiveVehicle, now: Long) {
-        val s=session ?: return
-        if(!activeJourney) return
-        val beltChecked=s.enforceBelt(v.freshBelt(now))
+        val s = session ?: return
+        if (!activeJourney) return
+        val beltChecked = s.enforceBelt(v.freshBelt(now))
         if (beltChecked.phase == Phase.DISQUALIFIED) {
-            session=beltChecked
-            report=null; ranking=emptyList(); earned=0; pendingBadges=emptyList()
-            notice="안전벨트 미착용으로 실격 처리했어요. 이번 점수·순위·보상은 지급하지 않습니다."
-            endService(); return
+            session = beltChecked
+            report = null
+            ranking = emptyList()
+            earned = 0
+            pendingBadges = emptyList()
+            recordingStartedAtNanos = null
+            notice = "안전벨트 미착용으로 실격 처리했어요. 이번 점수·순위·보상은 지급하지 않습니다."
+            endService()
+            return
         }
-        if(v.routeCancelled) {
-            session=s.copy(phase=Phase.CANCELLED); notice="경로 안내가 종료되어 기록을 취소했어요"; endService(); return
+        if (s.phase == Phase.AWAITING_PARK) {
+            if (v.isParked(now)) {
+                session = s.update(0.0, true, true)
+                finish(liveArrivalAt)
+            }
+            return
         }
-        if(v.destinationId != null && v.destinationId != s.destinationId) {
-            session=s.changeDestination(v.destinationId); notice="목적지가 변경되어 이번 기록을 종료했어요"; endService(); return
+        if (v.routeCancelled) {
+            session = s.copy(phase = Phase.CANCELLED)
+            recordingStartedAtNanos = null
+            notice = "경로 안내가 종료되어 기록을 취소했어요"
+            endService()
+            return
         }
-        if(phase==Phase.RECORDING && !demo && now-lastTurnAt>=200) {
-            if(v.freshBelt(now)==true) turnDetector.accept(v.turnObservation(now)) else turnDetector.interrupt()
-            lastTurnAt=now
+        if (v.destinationId != null && v.destinationId != s.destinationId) {
+            session = s.changeDestination(v.destinationId)
+            recordingStartedAtNanos = null
+            notice = "목적지가 변경되어 이번 기록을 종료했어요"
+            endService()
+            return
         }
-        val remaining=v.remainingM?.takeIf { now-v.destinationAt <=10_000 } ?: return
-        remainingM=remaining
-        session=s.update(remaining,v.arrived,v.isParked(now))
+        if (phase == Phase.RECORDING && now - lastTurnAt >= 200) {
+            if (v.freshBelt(now) == true) turnDetector.accept(v.turnObservation(now)) else turnDetector.interrupt()
+            lastTurnAt = now
+        }
+        if (v.arrived && v.arrivedAt != null && v.destinationId == s.destinationId) {
+            // Drain the sample stream while still RECORDING before the arrival changes phase.
+            drainRecordingSamples(SystemClock.elapsedRealtimeNanos())
+            progressReport = currentReport()
+            liveArrivalAt = v.arrivedAt
+            remainingM = 0.0
+            session = s.update(0.0, true, v.isParked(now))
+            recordingStartedAtNanos = null
+            if (phase == Phase.FINISHED) finish(liveArrivalAt)
+            return
+        }
+        val remaining = v.remainingM?.takeIf { now - v.destinationAt in 0..10_000 } ?: return
+        remainingM = remaining
+        session = s.update(remaining, false, v.isParked(now))
+        if (s.phase != Phase.RECORDING && phase == Phase.RECORDING) recordingStartedAtNanos = now * 1_000_000
         announceRecording(s.phase)
-        if(phase==Phase.RECORDING && now-lastSampleAt >=900) {
-            samples += Sample(now,if(v.freshBelt(now)==true)v.freshSpeed(now) else null,v.freshLimit(now)); lastSampleAt=now
-            progressReport=currentReport()
-        }
-        if(phase==Phase.FINISHED) finish()
     }
-    private fun finish() {
+    private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
         val r=currentReport()
         report=r
-        if(demo && s.rankingEligible && r.valid && r.score!=null) {
-            ranking=Settlement.rank(listOf(Entry("나",requireNotNull(r.score))) + listOf(Entry("느긋한 고래",92),Entry("민트 드라이버",89),Entry("차분한 오후",86),Entry("파란 구름",82)).take(selected.demoPeers))
+        missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
+        val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
+        if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
+            val fixtures = listOf(
+                Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
+                Entry("민트 드라이버", 89) to GeoPoint(37.524, 126.934),
+                Entry("차분한 오후", 86) to GeoPoint(37.530, 126.937),
+                Entry("파란 구름", 82) to GeoPoint(37.523, 126.927),
+                Entry("멀리 가는 무사즈", 95) to GeoPoint(37.540, 126.934),
+            )
+            val peers = if (selected.name == "여의도한강공원") {
+                fixtures.filter { (_, point) -> hangangVenue.includes(point) }
+            } else fixtures.take(selected.demoPeers)
+            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
-            earned=ledger.credit(s.id,allocation,s.destinationId,java.time.LocalDate.now().toString())
+            earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
             balance=ledger.balance
             prefs.edit().putInt("balance",balance).putStringSet("settled",ledger.settlementIds).putStringSet("daily",ledger.dailyKeys).apply()
             if(allocation>0 && earned==0) notice="오늘의 보상 한도를 적용했어요 · 목적지별 1회, 하루 2회"
@@ -295,7 +485,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             voice.say("무사히 도착했어요. 새 배지 ${pendingBadges.size}개를 받았어요.")
         completed++
         screen=Screen.RESULT
+        if (!uiVisible && parked) RecordingService.notifyResult(getApplication())
         endService()
     }
-    override fun onCleared() { demoJob?.cancel(); connection.stop(); voice.stop() }
+    override fun onCleared() { demoJob?.cancel(); connection.setConsoleCapture(false); connection.stop(); voice.stop() }
 }

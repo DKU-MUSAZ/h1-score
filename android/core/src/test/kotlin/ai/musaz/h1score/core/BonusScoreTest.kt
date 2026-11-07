@@ -5,7 +5,7 @@ import kotlin.test.*
 
 class BonusScoreTest {
     private fun trip(meters: Int, speed: Double=10.0, limit: Int?=50) =
-        (0..(meters/speed).toInt()).map{Sample(it*1000L,speed,limit)}
+        (0..(meters / speed * 10).toInt()).map { Sample(it * 100L, speed, limit) }
     @Test fun startsAtSixty() { assertEquals(60,ScoreEngine.evaluate(emptyList()).score) }
     @Test fun eachPerfectKmEarnsFourWithoutShortTripScaling() {
         for (km in 1..10) {
@@ -31,13 +31,13 @@ class BonusScoreTest {
         assertEquals(66,r.score);assertEquals(2.0,r.kilometers.last().points,1e-8)
     }
     @Test fun intervalSpanningKmBoundaryIsSplit() {
-        val r=ScoreEngine.evaluate((0..110).map{Sample(it*1000L,9.5,50)})
+        val r=ScoreEngine.evaluate((0..1100).map { Sample(it * 100L, 9.5, 50) })
         assertEquals(2,r.kilometers.size)
         assertEquals(4.0,r.kilometers.first().points,1e-8)
         assertEquals(45.0/1000*4,r.kilometers.last().points,1e-8)
     }
     @Test fun missingLimitCannotBeRecoveredByDrivingExtraDistance() {
-        val s=(0..1100).map { Sample(it*1000L,10.0,if(it in 101..150)null else 50) }
+        val s=(0..11000).map { Sample(it * 100L, 10.0, if (it in 1001..1500) null else 50) }
         val r=ScoreEngine.evaluate(s)
         assertEquals(95.0,r.coverage*100,1e-8)
         assertEquals(38.0,r.earnedPoints,1e-8)
@@ -48,11 +48,11 @@ class BonusScoreTest {
         assertNull(r.score);assertFalse(r.valid);assertEquals(0.0,r.earnedPoints)
     }
     @Test fun stoppedTimeCannotEarnPoints() {
-        val r=ScoreEngine.evaluate((0..1000).map{Sample(it*1000L,0.0,50)})
+        val r=ScoreEngine.evaluate((0..10000).map { Sample(it * 100L, 0.0, 50) })
         assertNull(r.score);assertEquals(0.0,r.earnedPoints)
     }
     @Test fun limitCrossingAllocatesOnlyCompliantDistance() {
-        val r=ScoreEngine.evaluate(listOf(Sample(0,10.0,54),Sample(1000,20.0,54)))
+        val r=ScoreEngine.evaluate((0..10).map { Sample(it * 100L, 10.0 + it, 54) })
         // Below limit until 15m/s: (10+15)/2 * 0.5 = 6.25 metres.
         assertEquals(6.25/1000*2.5,r.speedPoints,1e-8)
         assertEquals(0.0,r.accelerationPoints)

@@ -1,12 +1,36 @@
 package ai.musaz.h1score
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
 
 class MapChallengeTest {
-    @get:Rule val ui = createAndroidComposeRule<MainActivity>()
+    val ui = createAndroidComposeRule<MainActivity>()
+    private val permissions = object : ExternalResource() {
+        override fun before() {
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val context = instrumentation.targetContext
+            // Grant before ActivityScenario launches: the system permission activity otherwise
+            // hides Compose on a fresh install. This test exercises the challenge consent flow.
+            val requested = buildList {
+                add("android.car.permission.CAR_SPEED")
+                add("android.car.permission.CAR_POWERTRAIN")
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            requested.filter { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+                .forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
+        }
+    }
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(permissions).around(ui)
 
     @Test fun searchZoomConsentAndCompleteDemoDrive() {
         fun waitFor(label: String, timeout: Long = 15_000) {
@@ -36,7 +60,9 @@ class MapChallengeTest {
         ui.onNode(hasSetTextAction()).performTextReplacement("한강")
         ui.onNodeWithText("4명",useUnmergedTree=true).performClick()
         waitFor("이 목적지로 챌린지에 참가할까요?")
-        ui.onNodeWithText("참가 예약").performClick()
+        ui.onNodeWithText("참가 예약 · 내비 시작").assertIsNotEnabled()
+        ui.onNodeWithText("마감 및 참가 조건에 동의합니다").performClick()
+        ui.onNodeWithText("참가 예약 · 내비 시작").assertIsEnabled().performClick()
         waitFor("참가 예약 완료")
         ui.onNodeWithText("기본 60점",substring=true).assertExists()
         ui.onNodeWithText("시연 주행 재생",substring=true).performClick()

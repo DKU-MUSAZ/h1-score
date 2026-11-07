@@ -16,11 +16,11 @@ class BeltDisqualificationTest {
             vm.connection.stop()
             val now=SystemClock.elapsedRealtime()
             val parked=LiveVehicle(destination="벨트 검증",destinationId="belt-test",remainingM=14000.0,
-                destinationAt=now,speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
+                destinationAt=now,destinationPoint=GeoPoint(37.52639977,126.93360958),speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
             vm.receiveVehicle(parked)
             if(vm.demo)vm.switchSource()
             vm.receiveVehicle(parked)
-            vm.accept()
+            vm.accept(ChallengeRound("검증", java.time.Instant.now().minusSeconds(60), java.time.Instant.now().plusSeconds(3600)))
             assertEquals(Phase.RESERVED,vm.phase)
         }
         // Let Android create/promote the foreground service before ending the session.
@@ -29,7 +29,7 @@ class BeltDisqualificationTest {
             val vm=(ui.activity.application as H1Application).model
             val now=SystemClock.elapsedRealtime()
             val parked=LiveVehicle(destination="벨트 검증",destinationId="belt-test",remainingM=14000.0,
-                destinationAt=now,speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
+                destinationAt=now,destinationPoint=GeoPoint(37.52639977,126.93360958),speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
             val moving=parked.copy(remainingM=10000.0,speedMps=10.0,gearPark=false,uxRestricted=true)
             vm.receiveVehicle(moving)
             assertEquals(Phase.RECORDING,vm.phase)

@@ -30,7 +30,15 @@ data class ChallengeSession(
     fun changeDestination(next: String) = if (next != destinationId) copy(phase = Phase.CANCELLED) else this
 }
 
-data class Sample(val atMs: Long, val speedMps: Double?, val limitKph: Int?)
+data class Sample(
+    val atMs: Long,
+    val speedMps: Double?,
+    val limitKph: Int?,
+    /** Source timestamp, not the time at which the app polled or received this sample. */
+    val speedTimestampNanos: Long = atMs * 1_000_000L,
+    val brakePressed: Boolean? = null,
+    val brakeObservedAtMs: Long? = if (brakePressed != null) atMs else null,
+)
 data class KmBonus(val kilometer: Int, val distanceM: Double, val validDistanceM: Double,
                    val speedPoints: Double, val accelerationPoints: Double) {
     val points get() = speedPoints + accelerationPoints
@@ -42,29 +50,101 @@ data class ScoreReport(
     val speedPoints: Double, val accelerationPoints: Double,
     val kilometers: List<KmBonus>,
     val brakingEvents: Int = 0, val turns: List<TurnEvent> = emptyList(),
+    val longitudinalEvents: List<LongitudinalEvent> = emptyList(),
+    val longitudinalCoverage: Double = 0.0,
+    val longitudinalReady: Boolean = false,
+    val longitudinalSampleRateHz: Double = 0.0,
 ) {
+    // Braking is metadata on a deceleration event, never a second scored event.
+    val decelerationEvents get() = brakingEvents
     val earnedPoints get() = speedPoints + accelerationPoints
     val turnPenalty get() = turns.sumOf { it.penalty }.coerceAtMost(10.0)
     val totalPoints get() = (ScoreEngine.START_POINTS + earnedPoints - turnPenalty).coerceIn(0.0,100.0)
 }
 
-/** v0.2: distance-earned bonus; coefficients are prototype policies, not risk estimates. */
+/** Distance bonuses remain unchanged; only confirmed longitudinal events exclude smooth bonus. */
 object ScoreEngine {
     const val START_POINTS = 60.0
     const val SPEED_PER_KM = 2.5
     const val ACCELERATION_PER_KM = 1.5
     const val MAX_DISTANCE_M = 10_000.0
+    private data class Segment(
+        val index: Int, val v0: Double, val v1: Double, val seconds: Double,
+        val distance: Double, val limit: Int?,
+    )
+
     fun evaluate(samples: List<Sample>, turns: List<TurnEvent> = emptyList()): ScoreReport {
-        val bins = Array(10) { DoubleArray(4) } // travelled, valid, speed bonus, acceleration bonus
-        var expectedSeconds = 0.0; var validSeconds = 0.0; var travelled = 0.0
-        var validDistance = 0.0; var overDistance = 0.0; var compliantDistance = 0.0
-        var smoothDistance = 0.0; var accelerationEvents = 0; var wasAccelerating = false
-        var brakingEvents=0; var wasBraking=false; var scoredUntil=samples.firstOrNull()?.atMs ?: 0L
+        // Bound both event detection and scoring to the same first 10 km. In particular, an
+        // event that only qualifies after the boundary cannot remove earlier smooth bonus.
+        val bounded = ArrayList<Sample>()
+        val segments = ArrayList<Segment>()
+        samples.firstOrNull()?.let { bounded += it }
+        var travelled = 0.0
+        var expectedSeconds = 0.0
+        var validSeconds = 0.0
+        var scoredUntil = samples.firstOrNull()?.atMs ?: 0L
+        var highestTimestamp = samples.firstOrNull()?.speedTimestampNanos ?: Long.MIN_VALUE
+        var previousTimestampValid = highestTimestamp >= 0
+        for (index in 1 until samples.size) {
+            if (travelled >= MAX_DISTANCE_M - 1e-8) break
+            val a = samples[index - 1]; val b = samples[index]
+            val nanos = b.speedTimestampNanos - a.speedTimestampNanos
+            val nextTimestampValid = b.speedTimestampNanos >= 0 && b.speedTimestampNanos > highestTimestamp
+            val pairTimestampValid = previousTimestampValid && nextTimestampValid
+            val newlyObservedNanos = if (nextTimestampValid && highestTimestamp >= 0)
+                b.speedTimestampNanos - highestTimestamp else 0L
+            if (nextTimestampValid) highestTimestamp = b.speedTimestampNanos
+            previousTimestampValid = nextTimestampValid
+            if (!pairTimestampValid || nanos <= 0) {
+                expectedSeconds += newlyObservedNanos / 1e9; bounded += b; continue
+            }
+            val dt = nanos / 1e9
+            val v0 = a.speedMps; val v1 = b.speedMps
+            if (dt > 2.5 || v0 == null || v1 == null || !v0.isFinite() || !v1.isFinite() ||
+                v0 !in 0.0..80.0 || v1 !in 0.0..80.0) {
+                expectedSeconds += dt; bounded += b; continue
+            }
+            val fullDistance = (v0 + v1) / 2 * dt
+            val distance = min(fullDistance, MAX_DISTANCE_M - travelled).coerceAtLeast(0.0)
+            var seconds = dt
+            var endSpeed = v1
+            var end = b
+            if (distance < fullDistance) {
+                // Find time at the distance boundary under the same linear speed model used
+                // for distance and limit crossings; distance fraction is not time fraction.
+                val rate = (v1 - v0) / dt
+                var lo = 0.0; var hi = dt
+                repeat(48) {
+                    val middle = (lo + hi) / 2
+                    if (v0 * middle + rate * middle * middle / 2 < distance) lo = middle else hi = middle
+                }
+                seconds = (lo + hi) / 2
+                endSpeed = v0 + rate * seconds
+                val endNs = a.speedTimestampNanos + (seconds * 1e9).toLong()
+                end = b.copy(atMs = endNs / 1_000_000L, speedTimestampNanos = endNs,
+                    // Clipping a coarse measurement must not manufacture a high-rate sample.
+                    speedMps = endSpeed.takeIf { nanos <= LongitudinalRules.MAX_SAMPLE_GAP_NS })
+            }
+            bounded += end
+            scoredUntil = end.atMs
+            expectedSeconds += seconds
+            if (b.limitKph?.let { it in 1..150 } == true) validSeconds += seconds
+            segments += Segment(bounded.lastIndex, v0, endSpeed, seconds, distance, b.limitKph)
+            travelled += distance
+        }
+        val longitudinal = LongitudinalDetector.evaluate(bounded)
+        val byIndex = longitudinal.intervals.associateBy { it.sampleIndex }
+        val bins = Array(10) { DoubleArray(4) } // travelled, valid, speed bonus, smooth bonus
+        var allocated = 0.0
+        var validDistance = 0.0
+        var overDistance = 0.0
+        var compliantDistance = 0.0
+        var smoothDistance = 0.0
         fun add(distance: Double, valid: Boolean, compliant: Boolean, smooth: Boolean) {
-            var left = min(distance, MAX_DISTANCE_M - travelled).coerceAtLeast(0.0)
-            while (left > 1e-8 && travelled < MAX_DISTANCE_M - 1e-8) {
-                val index = (travelled / 1000).toInt().coerceIn(0,9)
-                val chunk = min(left, (index + 1) * 1000.0 - travelled)
+            var left = min(distance, MAX_DISTANCE_M - allocated).coerceAtLeast(0.0)
+            while (left > 1e-8 && allocated < MAX_DISTANCE_M - 1e-8) {
+                val index = (allocated / 1000).toInt().coerceIn(0, 9)
+                val chunk = min(left, (index + 1) * 1000.0 - allocated)
                 bins[index][0] += chunk
                 if (valid) {
                     validDistance += chunk; bins[index][1] += chunk
@@ -73,57 +153,80 @@ object ScoreEngine {
                         if (smooth) { smoothDistance += chunk; bins[index][3] += chunk / 1000 * ACCELERATION_PER_KM }
                     } else overDistance += chunk
                 }
-                travelled += chunk; left -= chunk
+                allocated += chunk; left -= chunk
             }
         }
-        for ((a,b) in samples.zipWithNext()) {
-            if (travelled >= MAX_DISTANCE_M - 1e-8) break
-            val dt = (b.atMs - a.atMs) / 1000.0
-            if (dt <= 0) continue
-            val v0=a.speedMps; val v1=b.speedMps; val limit=b.limitKph
-            if (dt > 2.5 || v0 == null || v1 == null || !v0.isFinite() || !v1.isFinite() ||
-                v0 !in 0.0..80.0 || v1 !in 0.0..80.0) {
-                expectedSeconds += dt; wasAccelerating=false; wasBraking=false; continue
-            }
-            val distance=(v0+v1)/2*dt
-            val usedFraction=if(distance > 0) min(1.0,(MAX_DISTANCE_M-travelled)/distance) else 1.0
-            scoredUntil=a.atMs+((b.atMs-a.atMs)*usedFraction).toLong()
-            expectedSeconds += dt*usedFraction
+        for (segment in segments) {
+            val limit = segment.limit
             if (limit == null || limit !in 1..150) {
-                add(distance,false,false,false);wasAccelerating=false;wasBraking=false;continue
+                add(segment.distance, false, false, false); continue
             }
-            validSeconds += dt*usedFraction
-            val accelerationRate=(v1-v0)/dt
-            val rapid=accelerationRate > 2.5
-            val braking=accelerationRate < -2.5
-            if(braking && !wasBraking) brakingEvents++
-            wasBraking=braking
-            val smooth=!rapid && !braking
-            if (rapid && !wasAccelerating) accelerationEvents++
-            wasAccelerating=rapid
-            val maxSpeed=limit/3.6
-            // Linear interpolation splits an interval at a limit crossing before kilometre allocation.
-            if ((v0 <= maxSpeed) != (v1 <= maxSpeed) && v0 != v1) {
-                val t=dt*(maxSpeed-v0)/(v1-v0)
-                add((v0+maxSpeed)/2*t,true,v0<=maxSpeed,smooth)
-                add((maxSpeed+v1)/2*(dt-t),true,v1<=maxSpeed,smooth)
-            } else add(distance,true,v1<=maxSpeed,smooth)
+            val interval = byIndex[segment.index]
+            // An absent/coarse signal is unknown. The 300 ms gap tolerance alone must not
+            // award smooth bonus to a feed that remains below the trial's effective 8 Hz.
+            val smooth = longitudinal.sampleRateHz >= LongitudinalRules.MIN_SAMPLE_RATE_HZ &&
+                interval?.assessable == true && !interval.abrupt
+            val maxSpeed = limit / 3.6
+            val excluded = interval?.abruptSpans.orEmpty()
+            val wholeIntervalExcluded = excluded.size == 1 && interval != null &&
+                excluded[0].startedAtNanos <= interval.startedAtNanos &&
+                excluded[0].endedAtNanos >= interval.endedAtNanos
+            if (excluded.isNotEmpty() && !wholeIntervalExcluded) {
+                // A rolling window may start inside a raw interval. Split the same linear
+                // distance model at that boundary, preserving bonus for the portion outside it.
+                val observed = requireNotNull(interval)
+                fun offset(nanos: Long): Double = when {
+                    nanos <= observed.startedAtNanos -> 0.0
+                    nanos >= observed.endedAtNanos -> segment.seconds
+                    else -> ((nanos - observed.startedAtNanos) / 1e9).coerceIn(0.0, segment.seconds)
+                }
+                val ranges = excluded.map { offset(it.startedAtNanos) to offset(it.endedAtNanos) }
+                val cuts = mutableListOf(0.0, segment.seconds)
+                ranges.forEach { (start, end) -> cuts += start; cuts += end }
+                if ((segment.v0 <= maxSpeed) != (segment.v1 <= maxSpeed) && segment.v0 != segment.v1)
+                    cuts += segment.seconds * (maxSpeed - segment.v0) / (segment.v1 - segment.v0)
+                fun speedAt(seconds: Double) = segment.v0 + (segment.v1 - segment.v0) * seconds / segment.seconds
+                val times = cuts.distinct().sorted()
+                var apportioned = 0.0
+                for (index in 1 until times.size) {
+                    val from = times[index - 1]; val to = times[index]
+                    val middle = (from + to) / 2
+                    val distance = if (index == times.lastIndex) (segment.distance - apportioned).coerceAtLeast(0.0)
+                        else (speedAt(from) + speedAt(to)) / 2 * (to - from)
+                    val excludedHere = ranges.any { (start, end) -> middle >= start && middle < end }
+                    add(distance, true, speedAt(middle) <= maxSpeed,
+                        longitudinal.sampleRateHz >= LongitudinalRules.MIN_SAMPLE_RATE_HZ &&
+                            observed.assessable && !excludedHere)
+                    apportioned += distance
+                }
+                continue
+            }
+            if ((segment.v0 <= maxSpeed) != (segment.v1 <= maxSpeed) && segment.v0 != segment.v1) {
+                val time = segment.seconds * (maxSpeed - segment.v0) / (segment.v1 - segment.v0)
+                val firstDistance = ((segment.v0 + maxSpeed) / 2 * time).coerceIn(0.0, segment.distance)
+                add(firstDistance, true, segment.v0 <= maxSpeed, smooth)
+                add(segment.distance - firstDistance, true, segment.v1 <= maxSpeed, smooth)
+            } else add(segment.distance, true, segment.v1 <= maxSpeed, smooth)
         }
-        val coverage=if(expectedSeconds>0) validSeconds/expectedSeconds else 0.0
-        val kilometers=bins.mapIndexedNotNull { i,v -> if(v[0] <= 1e-8) null else
-            KmBonus(i+1,v[0],v[1],v[2].coerceIn(0.0,SPEED_PER_KM),v[3].coerceIn(0.0,ACCELERATION_PER_KM)) }
-        val speed=kilometers.sumOf{it.speedPoints}.coerceIn(0.0,25.0)
-        val acceleration=kilometers.sumOf{it.accelerationPoints}.coerceIn(0.0,15.0)
-        val scoredTurns=turns.filter { it.startedAtMs >= (samples.firstOrNull()?.atMs ?: 0L) && it.endedAtMs<=scoredUntil }
-        val penalty=scoredTurns.sumOf { it.penalty }.coerceAtMost(10.0)
-        val raw=(START_POINTS+speed+acceleration-penalty).coerceIn(0.0,100.0)
-        val score=if(samples.isEmpty()) 60 else if(validDistance >= 500 && coverage >= .9)
-            raw.roundToInt().coerceIn(0,if(raw>=100-1e-8)100 else 99) else null
+        val coverage = if (expectedSeconds > 0) (validSeconds / expectedSeconds).coerceIn(0.0, 1.0) else 0.0
+        val kilometers = bins.mapIndexedNotNull { index, values -> if (values[0] <= 1e-8) null else
+            KmBonus(index + 1, values[0], values[1], values[2].coerceIn(0.0, SPEED_PER_KM),
+                values[3].coerceIn(0.0, ACCELERATION_PER_KM)) }
+        val speed = kilometers.sumOf { it.speedPoints }.coerceIn(0.0, 25.0)
+        val acceleration = kilometers.sumOf { it.accelerationPoints }.coerceIn(0.0, 15.0)
+        val scoredTurns = turns.filter { it.startedAtMs >= (samples.firstOrNull()?.atMs ?: 0L) && it.endedAtMs <= scoredUntil }
+        val penalty = scoredTurns.sumOf { it.penalty }.coerceAtMost(10.0)
+        val raw = (START_POINTS + speed + acceleration - penalty).coerceIn(0.0, 100.0)
+        val score = if (samples.isEmpty()) 60 else if (validDistance >= 500 && coverage >= .9 && longitudinal.ready)
+            raw.roundToInt().coerceIn(0, if (raw >= 100 - 1e-8) 100 else 99) else null
         return ScoreReport(score,
-            if(validDistance>0)compliantDistance/validDistance*100 else 0.0,
-            if(validDistance>0)smoothDistance/validDistance*100 else 0.0,
-            validDistance,coverage,validDistance>=9000-1e-8&&coverage>=.9,
-            accelerationEvents,overDistance,speed,acceleration,kilometers,brakingEvents,scoredTurns)
+            if (validDistance > 0) compliantDistance / validDistance * 100 else 0.0,
+            if (validDistance > 0) smoothDistance / validDistance * 100 else 0.0,
+            validDistance, coverage, validDistance >= 9000 - 1e-8 && coverage >= .9 && longitudinal.ready,
+            longitudinal.events.count { it.kind == LongitudinalKind.ACCELERATION }, overDistance,
+            speed, acceleration, kilometers,
+            longitudinal.events.count { it.kind == LongitudinalKind.DECELERATION }, scoredTurns,
+            longitudinal.events, longitudinal.coverage, longitudinal.ready, longitudinal.sampleRateHz)
     }
 }
 

@@ -26,7 +26,7 @@ import com.kakao.vectormap.label.LabelOptions
 import com.kakao.vectormap.label.LabelStyle
 import kotlinx.coroutines.delay
 
-private val challengeLocation = LatLng.from(37.52639977, 126.93360958)
+private val challengeLocation = LatLng.from(hangangVenue.latitude, hangangVenue.longitude)
 
 @Composable
 internal fun KakaoChallengeMap(

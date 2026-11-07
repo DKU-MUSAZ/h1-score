@@ -28,14 +28,14 @@ object BadgeRules {
     }
 }
 
-/** Accelerated fixtures only; every visible score still goes through ScoreEngine. */
+/** Ten-Hz fixtures; accelerated UI playback preserves vehicle-signal time for scoring. */
 enum class DemoDrive(val label: String) {
     GOOD("축하하는 무사즈"), STEADY("응원하는 무사즈"), RETRY("울먹이는 무사즈");
     fun sample(index: Int): Sample {
-        val speed=16.6 + sin(index*.03)*1.5
+        val speed=16.6 + sin(index*.003)*1.5
         // Repeat the same mixture on both short and full-length demo routes.
-        val phase=index % 200
+        val phase=(index / 10) % 200
         val lowLimit=when(this) { GOOD -> phase in 60..80; STEADY -> phase in 0..59; RETRY -> true }
-        return Sample(index*1000L,speed,if(lowLimit) 50 else 80)
+        return Sample(index*100L,speed,if(lowLimit) 50 else 80)
     }
 }

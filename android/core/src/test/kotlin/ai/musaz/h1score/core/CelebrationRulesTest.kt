@@ -23,8 +23,8 @@ class CelebrationRulesTest {
         assertFalse(BadgeRules.newAwards(true,"poi",84,1,emptySet()).any {it.id=="top-three"})
     }
     @Test fun `demo profiles exercise three real score outcomes`() {
-        // 192 samples: 3.2 km personal replay; 624: full 10 km replay.
-        listOf(624).forEach { sampleCount ->
+        // 6240 ten-Hz samples preserve the full-length demo route.
+        listOf(6240).forEach { sampleCount ->
             val scores=DemoDrive.entries.map { profile ->
                 ScoreEngine.evaluate((0 until sampleCount).map { profile.sample(it) }).score!!
             }
