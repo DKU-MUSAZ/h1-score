@@ -25,6 +25,7 @@ import ai.pleos.playground.navi.data.NavigationScreenRequest
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.DestinationArrivedInfo
 import ai.pleos.playground.navi.constants.NaviErrorCode
+import ai.pleos.playground.navi.constants.NavigationStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -41,6 +42,7 @@ data class LiveVehicle(
     val turnSignal: String? = null, val odometer: Float? = null,
     val destinationPoint: GeoPoint? = null, val arrivedAt: Instant? = null,
     val arrived: Boolean = false, val routeCancelled: Boolean = false,
+    val guidanceStartedAt: Long? = null,
     val statuses: Map<String,String> = emptyMap(),
 ) {
     val parked: Boolean get() = SystemClock.elapsedRealtime()-speedAt <= 2500 && gearPark == true && uxRestricted == false && speedMps?.let { it < .1 } == true
@@ -72,6 +74,14 @@ class PleosConnection(private val context: Context) {
     private fun status(key: String, value: String) { if(state.value.statuses[key] != value.take(140)) android.util.Log.d("H1Sdk", "$key: $value"); state.update { it.copy(statuses = it.statuses + (key to value.take(140))) } }
     private fun readable(c: CapabilityConfig) = c.accessType in listOf(AccessType.READ,AccessType.READ_WRITE)
     private val events = object : NaviHelperEventListener {
+        override fun onNavigationStatus(navigationStatus: NavigationStatus) {
+            state.update {
+                it.copy(guidanceStartedAt = if (navigationStatus == NavigationStatus.ROUTE_DRIVE) {
+                    it.guidanceStartedAt ?: SystemClock.elapsedRealtime()
+                } else null)
+            }
+            status("내비 안내 상태", navigationStatus.name)
+        }
         override fun onDestinationInfo(destinationInfo: DestinationInfo) {
             val key = "${destinationInfo.poiProvider}:${destinationInfo.poiId}:${destinationInfo.latitude}:${destinationInfo.longitude}"
             state.update { it.copy(destination = destinationInfo.name.takeIf { name -> name.isNotBlank() }, destinationId = key.takeIf { destinationInfo.name.isNotBlank() },

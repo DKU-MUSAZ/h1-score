@@ -28,14 +28,19 @@ class RecordingService : Service() {
     companion object {
         private const val resultId = 11
 
-        fun notifyResult(context: Context) {
+        fun notifyResult(context: Context, confirmedParked: Boolean) {
             if (Build.VERSION.SDK_INT >= 33 &&
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel("results", "주행 결과", NotificationManager.IMPORTANCE_DEFAULT))
+            val channel = if (confirmedParked) {
+                NotificationChannel("parked_results", "주차 후 주행 결과", NotificationManager.IMPORTANCE_HIGH)
+            } else {
+                NotificationChannel("results", "주행 결과", NotificationManager.IMPORTANCE_DEFAULT)
+            }
+            manager.createNotificationChannel(channel)
             val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val open = PendingIntent.getActivity(context, resultId, intent, PendingIntent.FLAG_IMMUTABLE)
-            manager.notify(resultId, Notification.Builder(context, "results")
+            manager.notify(resultId, Notification.Builder(context, channel.id)
                 .setSmallIcon(R.drawable.app_icon)
                 .setContentTitle("H1-score 주행 결과가 준비됐어요")
                 .setContentText("결과 보기를 눌러 이번 주행을 확인하세요.")

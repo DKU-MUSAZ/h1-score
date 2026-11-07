@@ -56,6 +56,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var liveArrivalAt: Instant? = null
     private var demoRoundStart = Instant.EPOCH
     private var demoStartedAt = 0L
+    private var demoRouteRequestedAt: Long? = null
     var missedDeadline by mutableStateOf(false); private set
     val destinationInHangangGroup get() = live.destinationPoint?.let(hangangVenue::includes) == true
 
@@ -71,9 +72,11 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             selectDestination(demoDestinations.first { it.name == "여의도한강공원" })
             accept(round)
             if (activeJourney) {
+                demoRouteRequestedAt = SystemClock.elapsedRealtime()
                 if (live.parked && connection.requestChallengeRoute()) {
                     openBuiltInNavigation()
                 } else {
+                    demoRouteRequestedAt = null
                     notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
                 }
             }
@@ -147,7 +150,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     private fun announceRecording(previous: Phase) {
         if (voiceEnabled && previous == Phase.RESERVED && phase == Phase.RECORDING)
-            voice.say("마지막 십 킬로미터입니다. 무사즈 기록을 시작해요.")
+            voice.say("목적지까지 십 킬로미터 남았습니다. 지금부터 무사즈가 안전운전 점수를 측정합니다.")
     }
     var demoDrive by mutableStateOf(DemoDrive.GOOD); private set
     var pendingBadges by mutableStateOf<List<BadgeAward>>(emptyList()); private set
@@ -179,7 +182,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     init {
         viewModelScope.launch { connection.flow.collect { next ->
             live=next
-            if (!demo) {
+            if (demo) {
+                val requestedAt = demoRouteRequestedAt
+                val guidanceStartedAt = next.guidanceStartedAt
+                if (requestedAt != null && guidanceStartedAt != null && guidanceStartedAt >= requestedAt &&
+                    next.destinationAt >= requestedAt && hasLiveRoute && destinationInHangangGroup) {
+                    startDemoPlayback()
+                }
+            } else {
                 if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
                     destinationInHangangGroup && next.destinationId != null && !next.arrived) {
                     awaitingMapRoute = false
@@ -242,10 +252,17 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     fun cancel() {
         if(!parked) return
+        demoRouteRequestedAt = null
         demoJob?.cancel(); demoRunning=false; session=null; report=null; remainingM=distanceKm*1000; screen=Screen.HOME; endService()
     }
     fun runDemo() {
-        if(!demo || !activeJourney || demoRunning || !parked) return
+        if (!parked) return
+        startDemoPlayback()
+    }
+
+    private fun startDemoPlayback() {
+        if (!demo || phase != Phase.RESERVED || demoRunning) return
+        demoRouteRequestedAt = null
         demoRunning=true; demoMoving=true
         demoJob=viewModelScope.launch {
             var fixtureIndex=0
@@ -335,7 +352,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             voice.say("무사히 도착했어요. 새 배지 ${pendingBadges.size}개를 받았어요.")
         completed++
         screen=Screen.RESULT
-        if (!uiVisible && parked) RecordingService.notifyResult(getApplication())
+        if (!uiVisible && parked) RecordingService.notifyResult(getApplication(), confirmedParked = live.parked)
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.stop(); voice.stop() }
