@@ -20,10 +20,10 @@ class TurnScoringTest {
             val vm=(ui.activity.application as H1Application).model
             val now=SystemClock.elapsedRealtime()
             val parked=LiveVehicle(destination="GPS 회전 검증",destinationId="turn-test",remainingM=14000.0,
-                destinationAt=now,speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
+                destinationAt=now,destinationPoint=GeoPoint(37.52639977,126.93360958),speedMps=0.0,speedAt=now,gearPark=true,uxRestricted=false,belt=true,beltAt=now)
             vm.receiveVehicle(parked)
             if(vm.demo)vm.switchSource()
-            vm.receiveVehicle(parked);vm.accept()
+            vm.receiveVehicle(parked);vm.accept(ChallengeRound("검증", java.time.Instant.now().minusSeconds(60), java.time.Instant.now().plusSeconds(3600)))
             assertEquals(Phase.RESERVED,vm.phase)
         }
         Thread.sleep(1500)
@@ -31,16 +31,16 @@ class TurnScoringTest {
             val vm=(ui.activity.application as H1Application).model
             val base=SystemClock.elapsedRealtime()
             val adapter=PleosConnection(ui.activity)
-            for(i in 0..480) {
-                val now=base+i*250L
-                val segment=i/48 // 12 seconds per test manoeuvre
-                val k=i%48
-                val turn=segment<4 && k in 12..23
-                val progress=((k-12)/12.0).coerceIn(0.0,1.0)
+            for(i in 0..1200) {
+                val now=base+i*100L
+                val segment=i/120 // 12 seconds per test manoeuvre
+                val k=i%120
+                val turn=segment<4 && k in 30..59
+                val progress=((k-30)/30.0).coerceIn(0.0,1.0)
                 val right=segment==1
                 val sign=if(right)1 else -1
                 val location=Location("gps").apply {
-                    latitude=37.0+i*.00001;longitude=127.0+sign*progress*.0003
+                    latitude=37.0+i*.000004;longitude=127.0+sign*progress*.0003
                     elapsedRealtimeNanos=now*1_000_000
                     accuracy=if(segment==3)50f else 3f
                     bearing=((sign*90*progress+360)%360).toFloat();bearingAccuracyDegrees=5f
@@ -49,16 +49,24 @@ class TurnScoringTest {
                 val gps=adapter.flow.value.gps
                 assertNotNull(gps)
                 val signal=when(segment) {0->"OFF";1->"LEFT";2->"LEFT";else->"OFF"}
-                val speed=if(i in 360..363)6.0 else 10.0
+                val seconds=i/10.0
+                val speed=when {
+                    seconds in 90.0..91.0 -> 10.0 - 3.2 * (seconds - 90.0)
+                    seconds > 91 && seconds < 92 -> 6.8
+                    seconds in 92.0..94.0 -> 6.8 + 3.0 * (seconds - 92.0)
+                    seconds > 94 && seconds < 96 -> 12.8 - 1.4 * (seconds - 94.0)
+                    else -> 10.0
+                }
                 vm.receiveVehicle(LiveVehicle(destination="GPS 회전 검증",destinationId="turn-test",
-                    remainingM=10000.0-i*2.5,destinationAt=now,speedMps=speed,speedAt=now,limitKph=50,limitAt=now,
+                    remainingM=10000.0-i,destinationAt=now,speedMps=speed,speedAt=now,limitKph=50,limitAt=now,
                     gearPark=false,forward=true,uxRestricted=true,belt=true,beltAt=now,
                     gps=gps,steeringDeg=if(turn)sign*8.0 else 0.0,steeringAt=now,turnSignal=signal,turnAt=now,
                     instruction=if(right)TurnDirection.RIGHT else TurnDirection.LEFT,instructionDistanceM=20.0,instructionAt=now),now)
+                vm.receiveSample(Sample(now,speed,50),now)
             }
             val end=base+121000
             vm.receiveVehicle(LiveVehicle(destination="GPS 회전 검증",destinationId="turn-test",remainingM=0.0,
-                destinationAt=end,speedMps=0.0,speedAt=end,gearPark=true,uxRestricted=false,belt=true,beltAt=end,arrived=true),end)
+                destinationAt=end,speedMps=0.0,speedAt=end,gearPark=true,uxRestricted=false,belt=true,beltAt=end,arrived=true,arrivedAt=java.time.Instant.now()),end)
             assertEquals(Phase.FINISHED,vm.phase)
             val r=vm.report!!
             assertEquals(3.0,r.turnPenalty,0.0001)

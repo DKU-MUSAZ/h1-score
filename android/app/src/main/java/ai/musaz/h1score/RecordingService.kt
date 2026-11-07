@@ -3,6 +3,9 @@ package ai.musaz.h1score
 import android.app.*
 import android.content.Intent
 import android.os.IBinder
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 
 class H1Application : Application() {
     var kakaoMapEnabled = false
@@ -22,6 +25,31 @@ class H1Application : Application() {
 
 /** Keeps the user-started session alive while navigation occupies the foreground. */
 class RecordingService : Service() {
+    companion object {
+        private const val resultId = 11
+
+        fun notifyResult(context: Context) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel("results", "주행 결과", NotificationManager.IMPORTANCE_DEFAULT))
+            val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val open = PendingIntent.getActivity(context, resultId, intent, PendingIntent.FLAG_IMMUTABLE)
+            manager.notify(resultId, Notification.Builder(context, "results")
+                .setSmallIcon(R.drawable.app_icon)
+                .setContentTitle("H1-score 주행 결과가 준비됐어요")
+                .setContentText("결과 보기를 눌러 이번 주행을 확인하세요.")
+                .setContentIntent(open)
+                .addAction(Notification.Action.Builder(null, "결과 보기", open).build())
+                .setAutoCancel(true)
+                .build())
+        }
+
+        fun clearResult(context: Context) {
+            context.getSystemService(NotificationManager::class.java).cancel(resultId)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         val manager = getSystemService(NotificationManager::class.java)

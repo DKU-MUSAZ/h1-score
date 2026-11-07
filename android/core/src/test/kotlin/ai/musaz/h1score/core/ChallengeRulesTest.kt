@@ -41,7 +41,7 @@ class ChallengeRulesTest {
         assertFalse(report.valid)
     }
     @Test fun `rapid braking excludes smooth driving bonus`() {
-        val report = ScoreEngine.evaluate(listOf(Sample(0, 20.0, 80), Sample(1000, 10.0, 80)))
+        val report = ScoreEngine.evaluate(SpeedTrace(initialSpeedMps = 20.0, limitKph = 80).drive(1000, -10.0).samples)
         assertEquals(0.0, report.smoothness)
         assertEquals(1, report.brakingEvents)
     }
@@ -83,15 +83,15 @@ class ChallengeRulesTest {
         assertEquals(100, ledger.credit("5",100,"a","2026-11-06"))
     }
     @Test fun `missing intervals reduce coverage and invalidate ranking`() {
-        val report=ScoreEngine.evaluate(listOf(Sample(0,20.0,80),Sample(1000,20.0,80),Sample(20000,20.0,80)))
+        val report=ScoreEngine.evaluate((0..10).map { Sample(it * 100L, 20.0, 80) } + Sample(20000, 20.0, 80))
         assertEquals(.05,report.coverage,.0001)
         assertFalse(report.valid)
         assertNull(report.score)
     }
     @Test fun `personal score needs distance but not ranking distance`() {
-        val short=ScoreEngine.evaluate((0..20).map { Sample(it*1000L,20.0,80) })
+        val short=ScoreEngine.evaluate((0..200).map { Sample(it*100L,20.0,80) })
         assertNull(short.score)
-        val personal=ScoreEngine.evaluate((0..60).map { Sample(it*1000L,20.0,80) })
+        val personal=ScoreEngine.evaluate((0..600).map { Sample(it*100L,20.0,80) })
         assertEquals(65,personal.score)
         assertFalse(personal.valid)
     }

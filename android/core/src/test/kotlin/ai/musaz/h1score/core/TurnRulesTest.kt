@@ -67,24 +67,26 @@ class TurnRulesTest {
         assertTrue(d.events.isEmpty());d.interrupt();assertEquals(0.0,d.events.single().penalty)
     }
     @Test fun hardBrakingReducesOnlySmoothnessBonus() {
-        val smooth=ScoreEngine.evaluate((0..1000).map { Sample(it*1000L,10.0,60) })
-        val harsh=ScoreEngine.evaluate((0..1000).map { Sample(it*1000L,if(it%4<2)10.0 else 6.0,60) })
+        val smooth=ScoreEngine.evaluate((0..10000).map { Sample(it*100L,10.0,60) })
+        val trace = SpeedTrace(initialSpeedMps = 10.0, limitKph = 60)
+        repeat(200) { trace.drive(1500, 3.0).drive(1500, -3.0).drive(2000) }
+        val harsh=ScoreEngine.evaluate(trace.samples)
         assertTrue(harsh.brakingEvents>0);assertTrue(harsh.accelerationEvents>0)
         assertEquals(100.0,harsh.compliance);assertTrue(harsh.smoothness<smooth.smoothness)
     }
-    @Test fun gentleBrakingAndThresholdBoundaryStillEarnBonus() {
-        val r=ScoreEngine.evaluate(listOf(Sample(0,10.0,60),Sample(1000,7.5,60)))
+    @Test fun gentleBrakingBelowThresholdStillEarnBonus() {
+        val r=ScoreEngine.evaluate(SpeedTrace(initialSpeedMps = 10.0, limitKph = 60).drive(1000, -2.5).samples)
         assertEquals(100.0,r.smoothness);assertEquals(0,r.brakingEvents)
     }
     @Test fun turnDeductionsAreCappedAndOnlyScoredDistanceCounts() {
-        val samples=(0..1100).map { Sample(it*1000L,10.0,50) }
+        val samples=(0..11000).map { Sample(it*100L,10.0,50) }
         val events=(1..20).map { TurnEvent(it*10000L,it*10000L+7000,TurnDirection.LEFT,TurnVerdict.MISMATCHED) }
         val report=ScoreEngine.evaluate(samples,events+TurnEvent(1001000,1008000,TurnDirection.RIGHT,TurnVerdict.UNUSED))
         assertEquals(10.0,report.turnPenalty);assertEquals(90,report.score)
         assertEquals(20,report.turns.size);assertEquals(90.0,report.totalPoints,1e-8)
     }
     @Test fun penaltyCanLowerScoreBelowSixty() {
-        val r=ScoreEngine.evaluate((0..1000).map{Sample(it*1000L,10.0,30)}, listOf(TurnEvent(100,7000,TurnDirection.LEFT,TurnVerdict.MISMATCHED)))
+        val r=ScoreEngine.evaluate((0..10000).map{Sample(it*100L,10.0,30)}, listOf(TurnEvent(100,7000,TurnDirection.LEFT,TurnVerdict.MISMATCHED)))
         assertEquals(58,r.score)
     }
 }
