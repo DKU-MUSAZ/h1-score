@@ -34,14 +34,14 @@ import ai.musaz.h1score.core.*
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private val Ink=Color(0xFF152D4C)
-private val Muted=Color(0xFF73818F)
-private val Paper=Color(0xFFF5F6F8)
-private val Line=Color(0xFFE2E7EB)
-private val Mint=Color(0xFF74DFB2)
-private val Green=Color(0xFF176B54)
-private val PaleMint=Color(0xFFEAF7F0)
-private val Gold=Color(0xFFBC8624)
+private val Ink=H1Style.Ink
+private val Muted=H1Style.Muted
+private val Paper=H1Style.Paper
+private val Line=H1Style.Line
+private val Mint=H1Style.Mint
+private val Green=H1Style.Green
+private val PaleMint=H1Style.PaleMint
+private val Gold=H1Style.Gold
 
 @Composable fun H1App(vm: ChallengeViewModel) {
     MaterialTheme(colorScheme=lightColorScheme(primary=Ink,secondary=Green,background=Paper,surface=Color.White,onSurface=Ink)) {
@@ -210,7 +210,7 @@ private val Gold=Color(0xFFBC8624)
         Text("같은 목적지로 향하는 우리. 마지막 10km를 좋은 습관으로 채워요.",
             fontSize=16.sp,color=Muted,modifier=Modifier.padding(top=5.dp,bottom=16.dp))
         Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFE9EFE5),Color(0xFFE7EFF2))))) {
+            .background(H1Style.heroBackground)) {
             ChallengeMap(vm,Modifier.weight(3f).fillMaxHeight())
             Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal=12.dp,vertical=20.dp),
                 horizontalAlignment=Alignment.CenterHorizontally) {
@@ -547,23 +547,7 @@ private val mileageRewards = listOf(
 }
 
 @Composable private fun Badges(vm:ChallengeViewModel) {
-    Row(Modifier.fillMaxSize(),horizontalArrangement=Arrangement.spacedBy(26.dp)) {
-        Column(Modifier.weight(.85f).fillMaxHeight().clip(RoundedCornerShape(26.dp)).background(Color(0xFFF3EEEA)).padding(26.dp)) {
-            Tag("내 배지 컬렉션",Color.White,Green)
-            Text("나의 무사한\n순간들.",fontSize=36.sp,lineHeight=46.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=14.dp))
-            ExpressionMascot(DriveMood.ENCOURAGING,Modifier.weight(1f).fillMaxWidth())
-            Text("조금씩 모이는 좋은 운전의 흔적",fontSize=13.sp,color=Muted)
-        }
-        Column(Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-            PageTitle("BADGE COLLECTION","작은 성취를 모아봐요","배지를 위한 추가 이동은 필요 없어요")
-            val earned=vm.ownedBadges.contains("first-drive")
-            BadgeRow("첫 무사 도착","첫 유효 주행 기록을 완성했어요",earned,Icons.Outlined.VerifiedUser,Gold)
-            BadgeRow("첫 발자국","${vm.ownedBadges.count { it.startsWith("visit:") }}곳에 남긴 첫 방문 기록",vm.ownedBadges.any { it.startsWith("visit:") },Icons.Outlined.LocationOn,Green)
-            BadgeRow("무사 TOP 3","85점 이상으로 그룹 상위 3위",vm.ownedBadges.contains("top-three"),Icons.Outlined.EmojiEvents,Color(0xFF8263A4))
-            BadgeRow("무사한 습관","준비 중 · 85점 이상 유효 기록 5회",false,Icons.Outlined.Eco,Green)
-            BadgeRow("꾸준한 무사즈","준비 중 · 서로 다른 7일의 유효 기록",false,Icons.Outlined.CalendarToday,Ink)
-        }
-    }
+    BadgeCollectionScreen(vm.ownedBadges) { vm.navigate(Screen.HOME) }
 }
 
 @Composable private fun History(vm:ChallengeViewModel) {
