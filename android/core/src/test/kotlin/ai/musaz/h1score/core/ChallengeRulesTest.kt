@@ -40,9 +40,10 @@ class ChallengeRulesTest {
         assertNull(report.score)
         assertFalse(report.valid)
     }
-    @Test fun `braking never incurs an acceleration penalty`() {
+    @Test fun `rapid braking excludes smooth driving bonus`() {
         val report = ScoreEngine.evaluate(listOf(Sample(0, 20.0, 80), Sample(1000, 10.0, 80)))
-        assertEquals(100.0, report.smoothness)
+        assertEquals(0.0, report.smoothness)
+        assertEquals(1, report.brakingEvents)
     }
     @Test fun `tied first shares two slots and third keeps own slot`() {
         val ranked = Settlement.rank(listOf(Entry("a",96),Entry("b",96),Entry("c",90),Entry("d",88),Entry("e",86)))
@@ -91,7 +92,7 @@ class ChallengeRulesTest {
         val short=ScoreEngine.evaluate((0..20).map { Sample(it*1000L,20.0,80) })
         assertNull(short.score)
         val personal=ScoreEngine.evaluate((0..60).map { Sample(it*1000L,20.0,80) })
-        assertEquals(100,personal.score)
+        assertEquals(65,personal.score)
         assertFalse(personal.valid)
     }
     @Test fun `stopped samples cannot inflate distance weighted compliance`() {

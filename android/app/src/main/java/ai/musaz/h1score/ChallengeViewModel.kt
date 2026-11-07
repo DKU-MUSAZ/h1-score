@@ -30,6 +30,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var remainingM by mutableDoubleStateOf(12_400.0); private set
     var demoMoving by mutableStateOf(false); private set
     var demoRunning by mutableStateOf(false); private set
+    var progressReport by mutableStateOf(ScoreEngine.evaluate(emptyList())); private set
     var report by mutableStateOf<ScoreReport?>(null); private set
     var ranking by mutableStateOf<List<RankedEntry>>(emptyList()); private set
     var earned by mutableIntStateOf(0); private set
@@ -145,6 +146,9 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()
+    private val turnDetector=TurnDetector()
+    private var lastTurnAt=0L
+    private fun currentReport()=ScoreEngine.evaluate(samples,turnDetector.events)
     private var lastSampleAt = 0L
     private var uiVisible = false
     private val isEmulator = android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.HARDWARE in listOf("ranchu","goldfish")
@@ -156,18 +160,18 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val resultUnlocked get() = phase == Phase.FINISHED && parked
 
     init {
-        viewModelScope.launch { connection.flow.collect { next ->
-            live=next
-            if (!demo) {
-                if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                    next.destination?.filter(Char::isLetterOrDigit) == "여의도한강공원") {
-                    awaitingMapRoute = false
-                    routeTimeout?.cancel()
-                    startSession()
-                }
-                consumeLive(next)
+        viewModelScope.launch { connection.flow.collect { next -> receiveVehicle(next) } }
+    }
+    // Explicit monotonic receipt time supports deterministic recorded-telemetry replay in tests.
+    internal fun receiveVehicle(next: LiveVehicle, receivedAt: Long = SystemClock.elapsedRealtime()) {
+        live=next
+        if (!demo) {
+            if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
+                next.destination?.filter(Char::isLetterOrDigit) == "여의도한강공원") {
+                awaitingMapRoute=false; routeTimeout?.cancel(); startSession()
             }
-        } }
+            consumeLive(next,receivedAt)
+        }
     }
     fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute) { connection.stop(); voice.stop() } }
@@ -205,7 +209,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         startSession()
     }
     private fun startSession() {
-        samples.clear(); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
+        samples.clear(); turnDetector.reset();lastTurnAt=0; progressReport=ScoreEngine.evaluate(emptyList()); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
         remainingM=distanceKm*1000
         session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM).accept(true)
         screen=Screen.JOURNEY
@@ -231,6 +235,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                         val i=fixtureIndex++
                         samples += demoDrive.sample(i)
                     }
+                    progressReport=currentReport()
                 }
             }
             session=session?.update(0.0,true,false)
@@ -241,28 +246,39 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             demoRunning=false
         }
     }
-    private fun consumeLive(v: LiveVehicle) {
+    private fun consumeLive(v: LiveVehicle, now: Long) {
         val s=session ?: return
         if(!activeJourney) return
+        val beltChecked=s.enforceBelt(v.freshBelt(now))
+        if (beltChecked.phase == Phase.DISQUALIFIED) {
+            session=beltChecked
+            report=null; ranking=emptyList(); earned=0; pendingBadges=emptyList()
+            notice="안전벨트 미착용으로 실격 처리했어요. 이번 점수·순위·보상은 지급하지 않습니다."
+            endService(); return
+        }
         if(v.routeCancelled) {
             session=s.copy(phase=Phase.CANCELLED); notice="경로 안내가 종료되어 기록을 취소했어요"; endService(); return
         }
         if(v.destinationId != null && v.destinationId != s.destinationId) {
             session=s.changeDestination(v.destinationId); notice="목적지가 변경되어 이번 기록을 종료했어요"; endService(); return
         }
-        val now=SystemClock.elapsedRealtime()
+        if(phase==Phase.RECORDING && !demo && now-lastTurnAt>=200) {
+            if(v.freshBelt(now)==true) turnDetector.accept(v.turnObservation(now)) else turnDetector.interrupt()
+            lastTurnAt=now
+        }
         val remaining=v.remainingM?.takeIf { now-v.destinationAt <=10_000 } ?: return
         remainingM=remaining
-        session=s.update(remaining,v.arrived,v.parked)
+        session=s.update(remaining,v.arrived,v.isParked(now))
         announceRecording(s.phase)
         if(phase==Phase.RECORDING && now-lastSampleAt >=900) {
-            samples += Sample(now,v.freshSpeed(now),v.freshLimit(now)); lastSampleAt=now
+            samples += Sample(now,if(v.freshBelt(now)==true)v.freshSpeed(now) else null,v.freshLimit(now)); lastSampleAt=now
+            progressReport=currentReport()
         }
         if(phase==Phase.FINISHED) finish()
     }
     private fun finish() {
         val s=session ?: return
-        val r=ScoreEngine.evaluate(samples)
+        val r=currentReport()
         report=r
         if(demo && s.rankingEligible && r.valid && r.score!=null) {
             ranking=Settlement.rank(listOf(Entry("나",requireNotNull(r.score))) + listOf(Entry("느긋한 고래",92),Entry("민트 드라이버",89),Entry("차분한 오후",86),Entry("파란 구름",82)).take(selected.demoPeers))

@@ -63,3 +63,10 @@ index.html        기획과 마스코트 모음
 
 - [주제 구체화](docs/주제-구체화.md) · [UX와 마스코트](docs/prototype/DESIGN.md) · [검증 기록](docs/prototype/QA.md)
 - 구조 레퍼런스는 Google의 [Now in Android](https://github.com/android/nowinandroid)와 [Android Architecture Samples](https://github.com/android/architecture-samples)입니다. 이 저장소는 Android 앱과 독립적으로 테스트할 수 있는 점수 모듈을 나누고, 실행 문서와 시연 자료를 별도로 관리합니다.
+
+
+### 점수 정책 변경 · v0.2 가점제
+
+시작 60점에 실제 주행 1km당 제한속도 준수 최대 +2.5점, 부드러운 가감속 최대 +1.5점을 합산합니다. 최대 10km·100점이며 짧은 주행을 만점으로 환산하지 않습니다. 결과 화면의 '1km별 가점 보기'에서 계산 근거를 확인할 수 있습니다. 실제 모드 예약·기록 중 운전석 벨트 미착용이 확인되면 해당 세션은 실격되고 보상 대상에서 제외됩니다. 상세 정책은 IMPLEMENTATION.md를 참고하세요. 기존 캡처·영상의 92점은 이전 점수 정책 기준입니다.
+
+GPS·NaviHelper 좌우회전 안내·앞바퀴 조향각·방향지시등을 함께 확인한 회전은 미사용 −1점, 반대 신호 −2점(주행당 최대 −10점)을 반영합니다. 정확도 부족·센서 누락·주차/후진·회전 안내 없는 곡선도로에는 감점을 확정하지 않습니다.

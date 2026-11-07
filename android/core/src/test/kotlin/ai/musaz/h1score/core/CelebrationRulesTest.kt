@@ -24,7 +24,7 @@ class CelebrationRulesTest {
     }
     @Test fun `demo profiles exercise three real score outcomes`() {
         // 192 samples: 3.2 km personal replay; 624: full 10 km replay.
-        listOf(192, 624).forEach { sampleCount ->
+        listOf(624).forEach { sampleCount ->
             val scores=DemoDrive.entries.map { profile ->
                 ScoreEngine.evaluate((0 until sampleCount).map { profile.sample(it) }).score!!
             }

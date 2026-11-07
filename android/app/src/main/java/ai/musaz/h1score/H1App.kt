@@ -355,19 +355,20 @@ private val Gold=Color(0xFFBC8624)
 @Composable private fun Journey(vm:ChallengeViewModel) {
     val waiting=vm.phase==Phase.RESERVED
     val arrived=vm.phase==Phase.AWAITING_PARK
-    val cancelled=vm.phase==Phase.CANCELLED
+    val disqualified=vm.phase==Phase.DISQUALIFIED
+    val cancelled=vm.phase==Phase.CANCELLED || disqualified
     val idle=vm.phase==Phase.IDLE
     Column(Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)).background(Ink).padding(34.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(if(waiting) Color(0xFFD8C394) else Mint,CircleShape))
-            Text(if(idle) "차량 상태 확인 중" else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
+            Text(if(idle) "차량 상태 확인 중" else if(disqualified) "안전벨트 미착용 · 실격" else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
             Spacer(Modifier.weight(1f))
             Text(vm.destinationName,color=Color(0xFFB7C7D8),fontSize=15.sp)
         }
         Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
-                Text(when {idle->"안전한 주차 후\n시작해 주세요.";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
-                Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
+                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->"안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
+                Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";disqualified->"이번 점수·순위·보상은 지급하지 않아요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
                 Spacer(Modifier.height(35.dp))
                 Row(verticalAlignment=Alignment.Bottom) {
                     Text("%.1f".format(vm.remainingM/1000),color=Color.White,fontSize=66.sp,fontWeight=FontWeight.Light,letterSpacing=(-3).sp)
@@ -376,6 +377,9 @@ private val Gold=Color(0xFFBC8624)
             }
             Box(Modifier.weight(1f).fillMaxHeight(),contentAlignment=Alignment.Center) { RouteArt(if(waiting) 0f else (1-vm.remainingM/10000).toFloat().coerceIn(0f,1f)) }
         }
+        Text(if(cancelled) "점수·보상 지급 제외" else "기본 60점 · 현재 누적 가점 +%.1f점 / 40점".format(vm.progressReport.earnedPoints) + " · 회전 −%.1f점".format(vm.progressReport.turnPenalty),
+            color=Mint,fontSize=16.sp,modifier=Modifier.padding(bottom=10.dp))
+        Text("1km마다 제한속도 준수 최대 +2.5점 · 부드러운 가감속 최대 +1.5점",color=Color(0xFFAFBDCC),fontSize=12.sp,modifier=Modifier.padding(bottom=12.dp))
         LinearProgressIndicator(progress={if(waiting) 0f else (1-vm.remainingM/10000).toFloat().coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),color=Mint,trackColor=Color(0xFF304765))
         Row(Modifier.fillMaxWidth().padding(top=17.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(if(waiting) "기록 시작까지 ${"%.1f".format(((vm.remainingM-10000)/1000).coerceAtLeast(0.0))} km" else if(arrived) "결과 공개 대기" else "안전한 곳까지 평소처럼 운전해 주세요",color=Color(0xFFAFBDCC),fontSize=13.sp)
@@ -392,9 +396,31 @@ private val Gold=Color(0xFFBC8624)
 @Composable private fun ResultScreen(vm:ChallengeViewModel,onBadge:()->Unit) {
     val report=vm.report
     if(report==null || !vm.resultUnlocked) { EmptyState("아직 기록이 없어요","챌린지에 참가하고 주차한 뒤 결과를 확인해 주세요.") { vm.navigate(Screen.HOME) }; return }
-    val mood=DriveMood.forScore(report.score)
+    var showKm by remember { mutableStateOf(false) }
+    val mood=if(report.valid) DriveMood.forScore(report.score) else DriveMood.NEUTRAL
     val accent=if(mood==DriveMood.TEARY) Color(0xFFA8654C) else Green
     val tone=if(mood==DriveMood.TEARY) Color(0xFFFFF1EB) else if(mood==DriveMood.CELEBRATING) Color(0xFFEAF7F0) else Color(0xFFEDF3F8)
+    if(showKm) AlertDialog(onDismissRequest={showKm=false},confirmButton={TextButton(onClick={showKm=false}){Text("닫기")}},
+        title={Text("1km별 가점 · 시작 60점")},text={
+            Column(Modifier.heightIn(max=480.dp).verticalScroll(rememberScrollState())) {
+                Text("제한속도 준수 +2.5점/km · 부드러운 가감속 +1.5점/km")
+                report.kilometers.forEach { km ->
+                    Text("\n${km.kilometer}km 구간 · %.0fm / 유효 %.0fm".format(km.distanceM,km.validDistanceM))
+                    Text("속도 +%.2f · 가감속 +%.2f = +%.2f점".format(km.speedPoints,km.accelerationPoints,km.points))
+                }
+                Text("\n회전: 미사용 −1점 · 반대 신호 −2점 / 합계 최대 −10점")
+                report.turns.forEach { event ->
+                    Text("${if(event.direction==ai.musaz.h1score.core.TurnDirection.LEFT) "좌회전" else "우회전"} · ${when(event.verdict) {
+                        ai.musaz.h1score.core.TurnVerdict.MATCHED -> "신호 일치"
+                        ai.musaz.h1score.core.TurnVerdict.UNUSED -> "신호 미사용 −1점"
+                        ai.musaz.h1score.core.TurnVerdict.MISMATCHED -> "반대 신호 −2점"
+                        ai.musaz.h1score.core.TurnVerdict.UNVERIFIABLE -> "판단 보류 · 감점 없음"
+                    }}")
+                }
+                Text("위치·회전 안내·조향·신호가 충분히 확인된 회전만 감점합니다. 회전 미확인은 안전 확인을 뜻하지 않습니다.")
+                Text("\n가감속 가점은 제한속도 준수 구간에서만 지급합니다. 미수신 구간에는 가점이 없습니다.")
+            }
+        })
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment=Alignment.CenterVertically) {
             Column { Text(vm.destinationName,color=Muted,fontSize=13.sp); Text(when(mood) {
@@ -418,14 +444,16 @@ private val Gold=Color(0xFFBC8624)
                     Text(when {
                         report.score==null->"자료가 모이면 함께 돌아볼게요."
                         report.compliance<85->"다음엔 제한속도를 조금 더 살펴봐요."
-                        report.smoothness<85->"출발할 때 가속 페달을 조금 더 부드럽게."
+                        report.smoothness<85->"가속과 제동을 조금 더 부드럽게."
                         else->"차분하게 이어간 흐름, 다음에도 함께해요."
                     },Modifier.padding(10.dp),fontSize=12.sp,color=accent,lineHeight=19.sp)
                 }
-                if(report.score != null) MetricBar("제한속도 준수",report.compliance.roundToInt(),"70% 반영")
-                Spacer(Modifier.height(10.dp));if(report.score != null) MetricBar("부드러운 가속",report.smoothness.roundToInt(),"30% 반영")
+                if(report.score != null) MetricBar("제한속도 준수",report.compliance.roundToInt(),"+%.2f / 25점".format(report.speedPoints))
+                Spacer(Modifier.height(10.dp));if(report.score != null) MetricBar("부드러운 가감속",report.smoothness.roundToInt(),"+%.2f / 15점".format(report.accelerationPoints))
+                Text("시작 60점 + 가점 %.2f − 회전 감점 %.1f점".format(report.earnedPoints,report.turnPenalty),fontSize=12.sp,color=Muted)
+                TextButton(onClick={showKm=true}) { Text("1km별 가점 보기") }
                 HorizontalDivider(Modifier.padding(vertical=10.dp),color=Line)
-                Row { SmallStat("유효 주행","%.1f km".format(report.validDistanceM/1000));Spacer(Modifier.weight(1f));SmallStat("데이터 수신","${(report.coverage*100).roundToInt()}%");Spacer(Modifier.weight(1f));SmallStat("급제동","감점 제외") }
+                Row { SmallStat("유효 주행","%.1f km".format(report.validDistanceM/1000));Spacer(Modifier.weight(1f));SmallStat("데이터 수신","${(report.coverage*100).roundToInt()}%");Spacer(Modifier.weight(1f));SmallStat("급감속","${report.brakingEvents}회") }
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) { Text("함께 도착한 무사즈",fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(vm.demo)Tag("시연 ${vm.ranking.size}인",Paper,Muted) }
