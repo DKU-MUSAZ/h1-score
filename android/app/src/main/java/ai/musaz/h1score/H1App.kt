@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,8 @@ import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.musaz.h1score.core.*
+import java.time.Instant
+import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -87,10 +90,12 @@ private val Gold=Color(0xFFBC8624)
                 !vm.activeJourney && !vm.demo && vm.hasLiveRoute -> {
                     var invite by remember { mutableStateOf(false) }
                     Button(onClick={invite=true}) { Text("참가 예약") }
-                    if (invite) AlertDialog(onDismissRequest={invite=false},title={Text("이번 드라이브 참가")},
-                        text={Text("속도와 제한속도를 기록하고, 도착 후 주차하면 결과를 확인할 수 있어요.")},
-                        confirmButton={TextButton(onClick={invite=false;vm.accept()}) { Text("동의하고 참가 예약") }},
-                        dismissButton={TextButton(onClick={invite=false}) { Text("닫기") }})
+                    if (invite) Modal("이번 드라이브 참가", vm.destinationName, { invite=false }) {
+                        RoundConsent(vm, "참가 예약", vm.destinationInHangangGroup && vm.live.beltConditionMet) {
+                            invite=false
+                            vm.accept(it)
+                        }
+                    }
                 }
                 !vm.activeJourney -> TextButton(onClick=vm::openBuiltInNavigation) { Text("내장 내비에서 검색",color=Mint) }
             }
@@ -160,7 +165,10 @@ private val Gold=Color(0xFFBC8624)
                 }
             }
         }
-        Primary("선택한 장소로 시연 예약") { destinations=false; vm.accept() }
+        RoundConsent(vm, "선택한 장소로 시연 예약", true) {
+            destinations=false
+            vm.accept(it)
+        }
     }
     if(simulator && vm.parked) Modal("프로토타입 제어", "사용자 화면과 개발 확인을 분리했어요",{simulator=false}) {
         Text("시연 모드는 가상의 목적지·주행·참가자 데이터를 사용합니다. Pleos 연결 모드는 실제 SDK 수신값만 표시합니다.",color=Muted,fontSize=16.sp,lineHeight=25.sp)
@@ -242,8 +250,8 @@ private val Gold=Color(0xFFBC8624)
         it.length >= 2 && listOf("여의도한강공원", "서울영등포구여의동로330").any { name -> it in name }
     }
     val matches = query.isBlank() || searchMatch != null
-    // The demo challenge closes tonight in Seoul.
-    val deadlineLabel = "D-DAY"
+    val now = rememberChallengeTime()
+    val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
     val participantCount = demoDestinations.first { it.name == "여의도한강공원" }.demoPeers
     Box(modifier.clipToBounds()) {
         if (showKakao) KakaoChallengeMap(participantCount, deadlineLabel, matches, searchMatch, { kakaoMap=it }, {
@@ -344,12 +352,58 @@ private val Gold=Color(0xFFBC8624)
             }
             Spacer(Modifier.height(8.dp))
         }
-        Primary(if(vm.demo) "참가 예약" else "동의하고 내비 시작",enabled=!beltRequired) {
+        if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
+            Text("현재 내비 목적지도 한강 챌린지 반경에 포함돼요.", color=Green)
+        }
+        RoundConsent(vm, if(vm.demo) "참가 예약 · 내비 시작" else "동의하고 내비 시작", !beltRequired,
+            if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
+                { round -> confirm=false; vm.accept(round) }
+            } else null) {
             confirm=false
-            vm.joinMapChallenge()
+            vm.joinMapChallenge(it)
         }
     }
 
+}
+
+@Composable private fun rememberChallengeTime(): Instant {
+    var now by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now = Instant.now()
+        }
+    }
+    return now
+}
+
+@Composable private fun RoundConsent(
+    vm: ChallengeViewModel,
+    action: String,
+    enabled: Boolean,
+    keepRoute: ((ChallengeRound) -> Unit)? = null,
+    onJoin: (ChallengeRound) -> Unit,
+) {
+    val now = rememberChallengeTime()
+    val round = ChallengeRound.currentOrNext(now)
+    var consent by remember(round) { mutableStateOf(false) }
+    val open = round.contains(now)
+    Text("${round.name} 챌린지 · ${round.hoursLabel} (한국 시간)", color=Ink, fontWeight=FontWeight.Bold)
+    Text("중간에 참가해도 마감은 ${round.closingLabel}예요. 마감 시각 전에 도착하지 못하면 순위와 마일리지 대상에서 제외돼요.",
+        color=Ink, modifier=Modifier.padding(top=8.dp))
+    Text("같은 회차에 챌린지 장소에서 직선거리 1km 이내를 목적지로 설정한 참가자끼리 비교해요.",
+        color=Muted, modifier=Modifier.padding(top=6.dp))
+    if (!open) Text(if (vm.demo) "시연은 다음 회차 시작 시각부터 재현해요." else "다음 회차 시작 전이에요.", color=Green)
+    Row(Modifier.fillMaxWidth().toggleable(value=consent, role=androidx.compose.ui.semantics.Role.Checkbox,
+        onValueChange={consent=it}), verticalAlignment=Alignment.CenterVertically) {
+        Checkbox(consent, onCheckedChange=null, modifier=Modifier.padding(12.dp))
+        Text("마감 및 참가 조건에 동의합니다", color=Ink)
+    }
+    val canSubmit = enabled && consent && (open || vm.demo)
+    Primary(action, enabled=canSubmit) { onJoin(round) }
+    if (keepRoute != null) OutlinedButton(onClick={keepRoute(round)}, enabled=canSubmit, modifier=Modifier.fillMaxWidth()) {
+        Text("현재 목적지로 참가")
+    }
 }
 
 @Composable private fun Journey(vm:ChallengeViewModel) {
@@ -404,7 +458,7 @@ private val Gold=Color(0xFFBC8624)
                 DriveMood.NEUTRAL->"무사히 도착했어요."
             },fontSize=29.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=8.dp)) }
             Spacer(Modifier.weight(1f))
-            Tag(if(report.valid) "기록 확인 완료" else "개인 기록",PaleMint,Green)
+            Tag(if(vm.missedDeadline) "마감 이후 도착 · 순위 제외" else if(report.valid) "기록 확인 완료" else "개인 기록",PaleMint,Green)
         }
         Spacer(Modifier.height(18.dp))
         Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(20.dp)) {
@@ -429,9 +483,9 @@ private val Gold=Color(0xFFBC8624)
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) { Text("함께 도착한 무사즈",fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(vm.demo)Tag("시연 ${vm.ranking.size}인",Paper,Muted) }
-                Text(if(vm.demo) "같은 목적지 · 같은 접근 구간 · 같은 평가 버전" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=16.dp))
+                Text(if(vm.demo) "같은 회차 · 챌린지 반경 1km" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=16.dp))
                 if(vm.ranking.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) { Text(if(!vm.demo) "이번 기록은 개인 결과로 확인해요.\n실제 경쟁·보상은 서버 연결 후 제공해요." else "보상 순위에 필요한 거리·데이터\n조건을 채우지 못했어요.",textAlign=TextAlign.Center,lineHeight=26.sp,color=Muted) }
+                    Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) { Text(if(!vm.demo) "이번 기록은 개인 결과로 확인해요.\n실제 경쟁·보상은 서버 연결 후 제공해요." else if(vm.missedDeadline) "마감 이후에 도착해 개인 기록만 표시해요." else "보상 순위에 필요한 거리·데이터\n조건을 채우지 못했어요.",textAlign=TextAlign.Center,lineHeight=26.sp,color=Muted) }
                 } else Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) { vm.ranking.forEach { row ->
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if(row.id=="나") PaleMint else Color.Transparent).padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
                         Text("%02d".format(row.rank),fontSize=15.sp,color=if(row.id=="나") Green else Muted,fontWeight=FontWeight.Bold,modifier=Modifier.width(40.dp))

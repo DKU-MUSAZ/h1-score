@@ -9,6 +9,7 @@ import ai.musaz.h1score.core.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.util.UUID
 
 data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
@@ -51,11 +52,31 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var routeRequestedAt = 0L
     private var routeTimeout: Job? = null
 
-    fun joinMapChallenge() {
-        if (!parked || activeJourney || awaitingMapRoute) return
+    private var activeRound: ChallengeRound? = null
+    private var liveArrivalAt: Instant? = null
+    private var demoRoundStart = Instant.EPOCH
+    private var demoStartedAt = 0L
+    var missedDeadline by mutableStateOf(false); private set
+    val destinationInHangangGroup get() = live.destinationPoint?.let(hangangVenue::includes) == true
+
+    private fun canJoinRound(round: ChallengeRound): Boolean {
+        if (demo || round.contains(Instant.now())) return true
+        notice = "현재 참가할 수 없는 시간이에요. 다음 회차를 확인해 주세요."
+        return false
+    }
+
+    fun joinMapChallenge(round: ChallengeRound) {
+        if (!parked || activeJourney || awaitingMapRoute || !canJoinRound(round)) return
         if (demo) {
             selectDestination(demoDestinations.first { it.name == "여의도한강공원" })
-            accept()
+            accept(round)
+            if (activeJourney) {
+                if (live.parked && connection.requestChallengeRoute()) {
+                    openBuiltInNavigation()
+                } else {
+                    notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
+                }
+            }
             return
         }
         if (!live.beltConditionMet) {
@@ -63,6 +84,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             return
         }
         if (!beginService()) return
+        activeRound = round
         routeRequestedAt = SystemClock.elapsedRealtime()
         awaitingMapRoute = true
         if (!connection.requestChallengeRoute()) {
@@ -108,7 +130,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             } else if (!connection.openNavigation(search = !activeJourney && !awaitingMapRoute)) {
                 error("No navigation launcher")
             }
-            if (demo) switchSource()
         }.onFailure { notice = "Pleos 하단의 내비 아이콘에서 목적지를 검색해 주세요" }
     }
     // Display fixtures only. The real destination is supplied by NaviHelper; counts are not live.
@@ -160,7 +181,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             live=next
             if (!demo) {
                 if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                    next.destination?.filter(Char::isLetterOrDigit) == "여의도한강공원") {
+                    destinationInHangangGroup && next.destinationId != null && !next.arrived) {
                     awaitingMapRoute = false
                     routeTimeout?.cancel()
                     startSession()
@@ -169,7 +190,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             }
         } }
     }
-    fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
+    fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
@@ -195,16 +216,25 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
     }
-    fun accept() {
-        if(!parked || awaitingMapRoute || activeJourney) return
+    fun accept(round: ChallengeRound) {
+        if(!parked || awaitingMapRoute || activeJourney || !canJoinRound(round)) return
+        if (!demo && !destinationInHangangGroup) {
+            notice = "내비 목적지가 챌린지 장소에서 1km 이내여야 해요."
+            return
+        }
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
         if(!demo && !live.beltConditionMet) { notice="운전석 벨트 상태를 확인한 뒤 참가해 주세요"; return }
         if(!beginService()) return
+        activeRound = round
+        demoRoundStart = maxOf(Instant.now(), round.opensAt)
+        demoStartedAt = SystemClock.elapsedRealtime()
         startSession()
     }
     private fun startSession() {
+        missedDeadline = false
+        liveArrivalAt = null
         samples.clear(); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
         remainingM=distanceKm*1000
         session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM).accept(true)
@@ -233,41 +263,67 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                     }
                 }
             }
+            val arrival = demoRoundStart.plusMillis(SystemClock.elapsedRealtime() - demoStartedAt)
             session=session?.update(0.0,true,false)
             delay(2200)
             demoMoving=false
             session=session?.update(0.0,true,true)
-            finish()
+            finish(arrival)
             demoRunning=false
         }
     }
     private fun consumeLive(v: LiveVehicle) {
         val s=session ?: return
         if(!activeJourney) return
+        if (s.phase == Phase.AWAITING_PARK) {
+            if (v.parked) {
+                session = s.update(0.0, true, true)
+                finish(liveArrivalAt)
+            }
+            return
+        }
         if(v.routeCancelled) {
             session=s.copy(phase=Phase.CANCELLED); notice="경로 안내가 종료되어 기록을 취소했어요"; endService(); return
         }
         if(v.destinationId != null && v.destinationId != s.destinationId) {
             session=s.changeDestination(v.destinationId); notice="목적지가 변경되어 이번 기록을 종료했어요"; endService(); return
         }
+        if (v.arrived && v.arrivedAt != null && v.destinationId == s.destinationId) {
+            liveArrivalAt = v.arrivedAt
+            remainingM = 0.0
+            session = s.update(0.0, true, v.parked)
+            if (phase == Phase.FINISHED) finish(liveArrivalAt)
+            return
+        }
         val now=SystemClock.elapsedRealtime()
         val remaining=v.remainingM?.takeIf { now-v.destinationAt <=10_000 } ?: return
         remainingM=remaining
-        session=s.update(remaining,v.arrived,v.parked)
+        session=s.update(remaining,false,v.parked)
         announceRecording(s.phase)
         if(phase==Phase.RECORDING && now-lastSampleAt >=900) {
             samples += Sample(now,v.freshSpeed(now),v.freshLimit(now)); lastSampleAt=now
         }
-        if(phase==Phase.FINISHED) finish()
     }
-    private fun finish() {
+    private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
         val r=ScoreEngine.evaluate(samples)
         report=r
-        if(demo && s.rankingEligible && r.valid && r.score!=null) {
-            ranking=Settlement.rank(listOf(Entry("나",requireNotNull(r.score))) + listOf(Entry("느긋한 고래",92),Entry("민트 드라이버",89),Entry("차분한 오후",86),Entry("파란 구름",82)).take(selected.demoPeers))
+        missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
+        val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
+        if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
+            val fixtures = listOf(
+                Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
+                Entry("민트 드라이버", 89) to GeoPoint(37.524, 126.934),
+                Entry("차분한 오후", 86) to GeoPoint(37.530, 126.937),
+                Entry("파란 구름", 82) to GeoPoint(37.523, 126.927),
+                Entry("멀리 가는 무사즈", 95) to GeoPoint(37.540, 126.934),
+            )
+            val peers = if (selected.name == "여의도한강공원") {
+                fixtures.filter { (_, point) -> hangangVenue.includes(point) }
+            } else fixtures.take(selected.demoPeers)
+            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
-            earned=ledger.credit(s.id,allocation,s.destinationId,java.time.LocalDate.now().toString())
+            earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
             balance=ledger.balance
             prefs.edit().putInt("balance",balance).putStringSet("settled",ledger.settlementIds).putStringSet("daily",ledger.dailyKeys).apply()
             if(allocation>0 && earned==0) notice="오늘의 보상 한도를 적용했어요 · 목적지별 1회, 하루 2회"
@@ -279,6 +335,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             voice.say("무사히 도착했어요. 새 배지 ${pendingBadges.size}개를 받았어요.")
         completed++
         screen=Screen.RESULT
+        if (!uiVisible && parked) RecordingService.notifyResult(getApplication())
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.stop(); voice.stop() }

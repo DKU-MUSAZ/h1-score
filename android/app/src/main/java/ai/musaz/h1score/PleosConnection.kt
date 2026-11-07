@@ -1,5 +1,7 @@
 package ai.musaz.h1score
 
+import ai.musaz.h1score.core.GeoPoint
+import java.time.Instant
 import android.car.Car
 import android.car.VehicleGear
 import android.car.VehiclePropertyIds
@@ -27,6 +29,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+internal val hangangVenue = GeoPoint(37.52639977, 126.93360958)
+
 data class LiveVehicle(
     val destination: String? = null, val destinationId: String? = null,
     val remainingM: Double? = null, val destinationAt: Long = 0,
@@ -35,6 +39,7 @@ data class LiveVehicle(
     val gearPark: Boolean? = null, val uxRestricted: Boolean? = null,
     val belt: Boolean? = null, val beltWarningOffAt: Long? = null, val brake: Boolean? = null,
     val turnSignal: String? = null, val odometer: Float? = null,
+    val destinationPoint: GeoPoint? = null, val arrivedAt: Instant? = null,
     val arrived: Boolean = false, val routeCancelled: Boolean = false,
     val statuses: Map<String,String> = emptyMap(),
 ) {
@@ -70,16 +75,18 @@ class PleosConnection(private val context: Context) {
         override fun onDestinationInfo(destinationInfo: DestinationInfo) {
             val key = "${destinationInfo.poiProvider}:${destinationInfo.poiId}:${destinationInfo.latitude}:${destinationInfo.longitude}"
             state.update { it.copy(destination = destinationInfo.name.takeIf { name -> name.isNotBlank() }, destinationId = key.takeIf { destinationInfo.name.isNotBlank() },
-                routeCancelled = false, arrived = if(it.destinationId == key) it.arrived else false, remainingM = destinationInfo.remainDistance.toDouble().takeIf { d -> d >= 0 }, destinationAt = SystemClock.elapsedRealtime()) }
+                destinationPoint = GeoPoint(destinationInfo.latitude, destinationInfo.longitude),
+                routeCancelled = false, arrived = if(it.destinationId == key) it.arrived else false,
+                arrivedAt = it.arrivedAt.takeIf { _ -> it.destinationId == key }, remainingM = destinationInfo.remainDistance.toDouble().takeIf { d -> d >= 0 }, destinationAt = SystemClock.elapsedRealtime()) }
             status("NaviHelper", "목적지 수신 · ${destinationInfo.remainDistance} m")
         }
         override fun onCurrentRoadSpeedLimit(speedLimit: Int) {
             state.update { it.copy(limitKph = speedLimit.takeIf { s -> s in 1..150 }, limitAt = SystemClock.elapsedRealtime()) }
             status("제한속도", "$speedLimit km/h · 콜백 수신")
         }
-        override fun onDestinationArrived(destinationArrivedInfo: DestinationArrivedInfo) { state.update { it.copy(arrived = true) } }
-        override fun onDestinationChanged() { state.update { it.copy(arrived = false, routeCancelled = false, limitKph = null) }; navi?.getDestinationInfo() }
-        override fun onRouteCancelled() { state.update { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,arrived = false,routeCancelled = true) } }
+        override fun onDestinationArrived(destinationArrivedInfo: DestinationArrivedInfo) { state.update { it.copy(arrived = true, arrivedAt = it.arrivedAt ?: Instant.now()) } }
+        override fun onDestinationChanged() { state.update { it.copy(arrived = false, arrivedAt = null, routeCancelled = false, limitKph = null) }; navi?.getDestinationInfo() }
+        override fun onRouteCancelled() { state.update { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,arrived = false,arrivedAt = null,destinationPoint = null,routeCancelled = true) } }
         override fun onReRouteEnded() { state.update { it.copy(limitKph = null) }; navi?.getDestinationInfo() }
         override fun onError(errorCode: NaviErrorCode) { status("NaviHelper", "대기 / ${errorCode.name}") }
     }
@@ -87,7 +94,7 @@ class PleosConnection(private val context: Context) {
         val helper = navi?.takeIf { naviReady } ?: return false
         return runCatching {
             helper.requestRoute(ai.pleos.playground.navi.data.RouteInfo(
-                latitude=37.52639977, longitude=126.93360958,
+                latitude=hangangVenue.latitude, longitude=hangangVenue.longitude,
                 displayLatitude=null, displayLongitude=null, poiName="여의도한강공원",
                 poiId="", poiSubId="", address="서울 영등포구 여의동로 330"))
             true
