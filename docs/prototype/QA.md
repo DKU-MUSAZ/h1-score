@@ -2,6 +2,29 @@
 
 최신 검증일: 2026-11-07. 실제 수행한 검사와 남은 검사를 구분한다.
 
+## 11월 7일 · 동료 브랜치 + 월간 배지 UI 통합 검증
+
+`feat/longitudinal-console-testing@6dc1798`을 `feat/driving-score-gps-turn-penalties`에 병합했다. 월간 배지 18종, 한 손으로 큰 트로피를 든 무사즈 4종, 공통 방패 배경, 원본 화면과 같은 배경/카드 스타일을 유지했다. 동료 브랜치의 `core`, `ChallengeViewModel`, `PleosConnection`은 변경하지 않았다.
+
+- `:core:test`: **93개 통과**, 실패·오류·스킵 0.
+- `:app:assembleDebug`, `:app:assembleDebugAndroidTest`: 성공.
+- `:app:lintDebug`: **오류 0 / 경고 14**. 기존 검증과 같은 경고 개수이며 폐기 예정 API·기존 설정 관련 권고가 남아 있다.
+- Pleos API 34 / emulator-5554에 통합 APK 업데이트 설치.
+- Android 통합 테스트 **7개 통과**, 실패 0: 지도 검색/참가 동의/시연 주행/결과, 안전벨트 실격, GPS 회전·가감속 결과 연결, 콘솔 입력 시험 3개, 월간 배지 UI 1개.
+- 배지 UI 검증: 4개 유형·트로피 등급 표시·진행률·조건 상세·교환권 안내·예시 기록 켜기/끄기. 미리보기 조작이 기존 잔액/보유 배지를 변경하지 않는지 확인.
+- 콘솔 시험 검증: 점수/결과 연결, 보상·배지·완료 횟수 불변, 차속 누락과 짧은 시험의 점수 보류, 취소 후 일반 내비/벨트 조건 복구.
+
+이번 Android 검사는 차량·GPS·내비 상태를 재생하는 회귀 테스트다. 실제 Virtual Console 버튼 조작에 따른 실시간 SDK 전달, 실차/실도로 검증을 새로 수행한 결과는 아니다. `PleosRouteSmokeTest`의 opt-in 실제 내비 경로 요청은 이번 회귀 테스트에 포함하지 않았다. 월간 배지와 50,000P 교환권은 정책 UI 미리보기이며 실제 지급·제휴 발급은 연결하지 않았다.
+
+검증 명령:
+
+```bash
+./gradlew :core:test :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
+adb -s emulator-5554 shell am instrument --user 10 -w -r \
+  -e class ai.musaz.h1score.BadgeCollectionUiTest,ai.musaz.h1score.BeltDisqualificationTest,ai.musaz.h1score.ConsoleInputTest,ai.musaz.h1score.MapChallengeTest,ai.musaz.h1score.TurnScoringTest \
+  ai.musaz.h1score.test/androidx.test.runner.AndroidJUnitRunner
+```
+
 ## 11월 7일 · Virtual Console 입력 시험
 
 기존 프로토타입 제어 모달·주행·결과·1km별 가점 화면에 디버그 에뮬레이터용 시험 진입 경로를 추가했다. 점수 엔진과 `longitudinal-v2` 기준은 변경하지 않는다. `CarPropertyManager`의 실제 차속·원본 timestamp를 수집하되 선택한 제한속도(50/80/100km/h)와 벨트 착용은 시험 가정이다. 내비·참가 시간 조건 없이 기록하며 GPS 회전 감점은 수집하지 않는다. 순위·마일리지·배지·완료 횟수는 증가시키지 않는다.
