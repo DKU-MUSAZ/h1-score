@@ -30,13 +30,13 @@ data class ChallengeRound(val name: String, val opensAt: Instant, val closesAt: 
 }
 
 data class GeoPoint(val latitude: Double, val longitude: Double) {
-    fun includes(destination: GeoPoint): Boolean {
+    fun includes(destination: GeoPoint, radiusMeters: Double = 1_000.0): Boolean {
         if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0 ||
             destination.latitude !in -90.0..90.0 || destination.longitude !in -180.0..180.0) return false
         val lat = Math.toRadians(destination.latitude - latitude)
         val lon = Math.toRadians(destination.longitude - longitude)
         val a = sin(lat / 2).pow(2) + cos(Math.toRadians(latitude)) *
             cos(Math.toRadians(destination.latitude)) * sin(lon / 2).pow(2)
-        return 12_742_000 * asin(sqrt(a.coerceIn(0.0, 1.0))) <= 1_000
+        return 12_742_000 * asin(sqrt(a.coerceIn(0.0, 1.0))) <= radiusMeters
     }
 }

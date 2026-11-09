@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
@@ -74,7 +75,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     fun joinMapChallenge(round: ChallengeRound) {
-        if (!parked || activeJourney || awaitingMapRoute || !canJoinRound(round)) return
+        if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !canJoinRound(round)) return
         if (demo) {
             selectDestination(demoDestinations.first { it.name == "여의도한강공원" })
             accept(round)
@@ -160,6 +161,99 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var demoDrive by mutableStateOf(DemoDrive.GOOD); private set
     var pendingBadges by mutableStateOf<List<BadgeAward>>(emptyList()); private set
     var ownedBadges by mutableStateOf(prefs.getStringSet("badges-live", emptySet())?.toSet() ?: emptySet()); private set
+    internal var rankBadgeProgress by mutableStateOf(readRankBadgeProgress("rank-badges-live"))
+        private set
+    private val collectionStore = CollectionProgressStore(prefs)
+    internal var collectionProgress by mutableStateOf(collectionStore.read(demo = false))
+        private set
+    internal var trackedSpot by mutableStateOf<SpotTour?>(null)
+        private set
+    private var spotStartedAt: Instant? = null
+    private var spotRouteId: String? = null
+    private var spotTimeout: Job? = null
+
+    private fun spotRecordingIdle(): Boolean {
+        if (trackedSpot == null) return true
+        notice = "스팟투어 방문 기록을 종료한 뒤 다시 시도해 주세요"
+        return false
+    }
+
+    internal fun startSpotVisit(spot: SpotTour) {
+        if (demo || !parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !beginService()) return
+        trackedSpot = spot
+        spotStartedAt = Instant.now()
+        spotRouteId = null
+        spotTimeout = viewModelScope.launch {
+            delay(4 * 60 * 60 * 1000L)
+            finishSpotVisit("스팟투어 방문 기록 시간이 끝났어요")
+        }
+        consumeSpotVisit(live)
+        if (spotRouteId != null) openBuiltInNavigation() else searchInNavigation(spot.destinationName)
+    }
+
+    internal fun cancelSpotVisit() {
+        if (parked && trackedSpot != null) finishSpotVisit("스팟투어 방문 기록을 종료했어요")
+    }
+
+    private fun finishSpotVisit(message: String) {
+        trackedSpot = null
+        spotStartedAt = null
+        spotRouteId = null
+        spotTimeout?.cancel()
+        spotTimeout = null
+        notice = message
+        endService()
+    }
+
+    private fun consumeSpotVisit(vehicle: LiveVehicle) {
+        val spot = trackedSpot ?: return
+        if (vehicle.routeCancelled) {
+            if (spotRouteId != null) finishSpotVisit("길 안내가 취소되어 방문 기록을 종료했어요")
+            return
+        }
+        val route = vehicle.destinationId ?: return
+        val matches = spot.matches(vehicle.destination, vehicle.destinationPoint)
+        if (!vehicle.arrived) {
+            spotRouteId = route.takeIf { matches && hasLiveRoute }
+            return
+        }
+        val arrivedAt = vehicle.arrivedAt ?: return
+        val startedAt = spotStartedAt ?: return
+        if (!matches || route != spotRouteId || arrivedAt < startedAt || !vehicle.parked) return
+        val progress = collectionProgress.recordVisit(spot, arrivedAt.atZone(ChallengeRound.seoul).toLocalDate())
+        val changed = progress != collectionProgress
+        if (changed) {
+            collectionStore.saveVisit(spot, progress)
+            collectionProgress = progress
+        }
+        val visits = progress.visits(spot)
+        finishSpotVisit(when {
+            changed && visits == 3 -> "${spot.city} 스팟투어 배지를 획득했어요"
+            changed -> "${spot.city} 스팟투어 방문을 기록했어요 · $visits / 3회"
+            visits == 3 -> "이미 획득한 스팟투어 배지예요"
+            else -> "오늘 이 스팟의 방문은 이미 기록됐어요"
+        })
+    }
+
+    private val rankBadgeKey get() = if (demo) "rank-badges-demo" else "rank-badges-live"
+
+    private fun readRankBadgeProgress(key: String): RankBadgeProgress = RankBadgeProgress(
+        RankBadgeGoal.entries.associateWith { prefs.getInt("$key-${it.id}", 0) },
+        prefs.getStringSet("$key-days", emptySet()).orEmpty()
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
+    )
+
+    private fun recordRankBadgeProgress(arrivedAt: Instant, rank: Int, participants: Int) {
+        val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
+        val updated = rankBadgeProgress.record(day, rank, participants, demo)
+        if (updated == rankBadgeProgress) return
+        val key = rankBadgeKey
+        prefs.edit().apply {
+            RankBadgeGoal.entries.forEach { putInt("$key-${it.id}", updated.days(it)) }
+            putStringSet("$key-days", updated.countedDays.map { it.toString() }.toSet())
+        }.apply()
+        rankBadgeProgress = updated
+    }
     fun chooseDemoDrive(profile: DemoDrive) { if(demo && parked && !activeJourney) demoDrive=profile }
     fun acknowledgeBadge() { if(parked) pendingBadges=pendingBadges.drop(1) }
     private val ledger = MileageLedger(prefs.getInt("balance", 0),prefs.getStringSet("settled", emptySet()) ?: emptySet(),prefs.getStringSet("daily", emptySet()) ?: emptySet())
@@ -198,15 +292,16 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                 startSession()
             }
             consumeLive(next)
+            consumeSpotVisit(next)
         }
     }
     fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
-    fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute) { connection.stop(); voice.stop() } }
+    fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute && trackedSpot == null) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
         if(!uiVisible) { connection.stop(); voice.stop() }
     }
-    fun serviceEnded() { if(!uiVisible && !activeJourney && !awaitingMapRoute) connection.stop() }
+    fun serviceEnded() { if(!uiVisible && !activeJourney && !awaitingMapRoute && trackedSpot == null) connection.stop() }
     private fun beginService(): Boolean = runCatching {
         getApplication<Application>().startForegroundService(android.content.Intent(getApplication(), RecordingService::class.java))
         true
@@ -217,17 +312,19 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     fun selectDestination(d: Destination) { if (!parked || activeJourney) return; selected=d; remainingM=d.distanceKm*1000; report=null; session=null }
     fun switchSource() {
-        if(activeJourney || awaitingMapRoute || !parked) return
+        if(activeJourney || awaitingMapRoute || !parked || !spotRecordingIdle()) return
         if(demo && !live.parked) { notice="실제 기기의 속도·P단·화면 제한을 먼저 확인해 주세요"; return }
         demo=!demo
         pendingBadges=emptyList()
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
+        rankBadgeProgress = readRankBadgeProgress(rankBadgeKey)
+        collectionProgress = collectionStore.read(demo)
         session=null; report=null; ranking=emptyList(); earned=0
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
     }
     fun accept(round: ChallengeRound) {
-        if(!parked || awaitingMapRoute || activeJourney || !canJoinRound(round)) return
+        if(!parked || awaitingMapRoute || activeJourney || !spotRecordingIdle() || !canJoinRound(round)) return
         if (!demo && !destinationInHangangGroup) {
             notice = "내비 목적지가 챌린지 장소에서 1km 이내여야 해요."
             return
@@ -320,6 +417,15 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         report=r
         missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
         val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
+        val score = r.score
+        if (arrivedAt != null && withinRound && s.rankingEligible && r.valid && score != null) {
+            val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
+            val progress = collectionProgress.recordChallenge(day, score)
+            if (progress != collectionProgress) {
+                collectionStore.saveChallenge(demo, progress)
+                collectionProgress = progress
+            }
+        }
         if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
             val fixtures = listOf(
                 Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
@@ -338,7 +444,11 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             prefs.edit().putInt("balance",balance).putStringSet("settled",ledger.settlementIds).putStringSet("daily",ledger.dailyKeys).apply()
             if(allocation>0 && earned==0) notice="오늘의 보상 한도를 적용했어요 · 목적지별 1회, 하루 2회"
         } else { ranking=emptyList(); earned=0 }
-        pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,ranking.firstOrNull { it.id=="나" }?.rank,ownedBadges)
+        val playerRank = ranking.firstOrNull { it.id == "나" }?.rank
+        if (playerRank != null && arrivedAt != null) {
+            recordRankBadgeProgress(arrivedAt, playerRank, ranking.size)
+        }
+        pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,playerRank,ownedBadges)
         ownedBadges=ownedBadges+pendingBadges.map { it.id }
         prefs.edit().putStringSet(if(demo) "badges-demo" else "badges-live",ownedBadges).apply()
         if (voiceEnabled && uiVisible && parked && pendingBadges.isNotEmpty())
