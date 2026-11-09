@@ -3,6 +3,7 @@ package ai.musaz.h1score.core
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.roundToInt
 
 enum class SpotTour(val id: String, val city: String, val location: GeoPoint) {
     SEOUL("spot-seoul", "서울", GeoPoint(37.52128, 127.03439)),
@@ -28,6 +29,12 @@ data class CollectionProgress(
     val challengeWeeks get() = scoresByDay.keys.map(::monday).toSet().size
     fun scoreWeeks(minimum: Int) = scoresByDay.asSequence().filter { it.value >= minimum }
         .map { monday(it.key) }.toSet().size
+
+    fun weeklyScoreAverage(today: LocalDate): Int? {
+        val start = monday(today)
+        val scores = scoresByDay.filterKeys { it >= start && it <= today }.values
+        return if (scores.isEmpty()) null else scores.average().roundToInt()
+    }
 
     fun visits(spot: SpotTour) = visitsBySpot[spot].orEmpty().size
 

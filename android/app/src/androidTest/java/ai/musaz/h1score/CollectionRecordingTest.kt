@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
@@ -65,6 +66,21 @@ class CollectionRecordingTest {
             assertEquals(1, model.collectionProgress.challengeDays)
             assertEquals(1, store.read(true).challengeDays)
             assertEquals(0, store.read(false).challengeDays)
+            assertTrue(model.recordedDistanceMeters >= 9_000)
+            assertEquals(model.recordedDistanceMeters, app.prefs.getLong("recorded-distance-demo", 0))
+            assertEquals(0L, app.prefs.getLong("recorded-distance-live", 0))
+        }
+    }
+
+    @Test fun recentDestinationsKeepTheThreeMostRecentDistinctSearches() {
+        val app = isolatedApplication()
+        ui.runOnIdle {
+            val model = ChallengeViewModel(app)
+            model.receiveVehicle(parkedVehicle())
+            listOf("서울역", "한강공원", "광화문", "강남역", " 한강공원 ").forEach(model::rememberDestination)
+            val expected = listOf("한강공원", "강남역", "광화문")
+            assertEquals(expected, model.recentDestinations)
+            assertEquals(expected, ChallengeViewModel(app).recentDestinations)
         }
     }
 

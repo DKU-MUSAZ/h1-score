@@ -9,6 +9,17 @@ import org.junit.Test
 class CollectionProgressTest {
     private val monday = LocalDate.of(2026, 11, 30)
 
+    @Test fun weeklyAverageUsesDailyBestScoresOnlyWithinThisWeek() {
+        val progress = CollectionProgress()
+            .recordChallenge(monday.minusDays(1), 100)
+            .recordChallenge(monday, 70)
+            .recordChallenge(monday, 90)
+            .recordChallenge(monday.plusDays(1), 84)
+            .recordChallenge(monday.plusDays(2), 100)
+        assertEquals(87, progress.weeklyScoreAverage(monday.plusDays(1)))
+        assertEquals(null, progress.weeklyScoreAverage(monday.plusWeeks(1)))
+    }
+
     @Test fun oneDayCountsOnceAndKeepsItsHighestScore() {
         val progress = CollectionProgress()
             .recordChallenge(monday, 80)

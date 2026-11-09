@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import kotlin.math.roundToLong
+import org.json.JSONArray
 
 data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
 val demoDestinations = listOf(
@@ -20,6 +22,7 @@ val demoDestinations = listOf(
     Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 4),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
+internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
 
 class ChallengeViewModel(app: Application): AndroidViewModel(app) {
@@ -27,6 +30,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var live by mutableStateOf(LiveVehicle()); private set
     var demo by mutableStateOf(false); private set
     var screen by mutableStateOf(Screen.HOME); private set
+    internal val homeGreeting = listOf(
+        "오늘도 무사즈와 달려볼까요?",
+        "오늘도 무사히, 함께 출발해요."
+    ).random()
     var selected by mutableStateOf(demoDestinations[0]); private set
     var session by mutableStateOf<ChallengeSession?>(null); private set
     var remainingM by mutableDoubleStateOf(12_400.0); private set
@@ -38,6 +45,24 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var notice by mutableStateOf<String?>(null)
     var completed by mutableIntStateOf(0); private set
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
+    internal var recentDestinations by mutableStateOf(readRecentDestinations())
+        private set
+    internal var recordedDistanceMeters by mutableLongStateOf(prefs.getLong(distanceKey(false), 0))
+        private set
+
+    private fun distanceKey(demo: Boolean) = if (demo) "recorded-distance-demo" else "recorded-distance-live"
+
+    private fun readRecentDestinations(): List<String> = runCatching {
+        val saved = JSONArray(prefs.getString("recent-destinations", "[]"))
+        List(saved.length()) { saved.optString(it) }.filter(String::isNotBlank).take(3)
+    }.getOrDefault(emptyList())
+
+    internal fun rememberDestination(keyword: String) {
+        val name = keyword.trim()
+        if (!parked || name.isBlank()) return
+        recentDestinations = (listOf(name) + recentDestinations.filterNot { it.equals(name, ignoreCase = true) }).take(3)
+        prefs.edit().putString("recent-destinations", JSONArray(recentDestinations).toString()).apply()
+    }
     var nickname by mutableStateOf(prefs.getString("profile-nickname",null) ?: "무사즈 드라이버"); private set
     fun updateNickname(input: String): Boolean {
         val value=input.trim()
@@ -77,7 +102,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     fun joinMapChallenge(round: ChallengeRound) {
         if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !canJoinRound(round)) return
         if (demo) {
-            selectDestination(demoDestinations.first { it.name == "여의도한강공원" })
+            selectDestination(hangangChallenge)
             accept(round)
             if (activeJourney) {
                 if (live.parked && connection.requestChallengeRoute()) {
@@ -123,6 +148,12 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             openBuiltInNavigation()
             notice = "내비 검색창에서 장소를 선택해 주세요"
         }
+    }
+
+    internal fun searchDestination(keyword: String) {
+        if (!parked || activeJourney || awaitingMapRoute || keyword.isBlank()) return
+        rememberDestination(keyword)
+        searchInNavigation(keyword)
     }
 
     fun openBuiltInNavigation() {
@@ -319,6 +350,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
         rankBadgeProgress = readRankBadgeProgress(rankBadgeKey)
         collectionProgress = collectionStore.read(demo)
+        recordedDistanceMeters = prefs.getLong(distanceKey(demo), 0)
         session=null; report=null; ranking=emptyList(); earned=0
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
@@ -418,6 +450,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
         val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
         val score = r.score
+        if (arrivedAt != null && score != null) {
+            recordedDistanceMeters += r.validDistanceM.roundToLong()
+            prefs.edit().putLong(distanceKey(demo), recordedDistanceMeters).apply()
+        }
         if (arrivedAt != null && withinRound && s.rankingEligible && r.valid && score != null) {
             val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
             val progress = collectionProgress.recordChallenge(day, score)

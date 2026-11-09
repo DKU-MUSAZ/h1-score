@@ -163,7 +163,7 @@ private val Gold=H1Style.Gold
             }
             AnimatedContent(targetState=display,modifier=Modifier.weight(1f),transitionSpec={ (fadeIn(tween(220))+slideInHorizontally { it/25 }) togetherWith fadeOut(tween(120)) },label="screen") { screen ->
                 when(screen) {
-                    Screen.HOME -> Home(vm)
+                    Screen.HOME -> ChallengeHomeScreen(vm)
                     Screen.JOURNEY -> Journey(vm)
                     Screen.RESULT -> ResultScreen(vm) { badgeReveal=true }
                     Screen.WALLET -> Wallet(vm)
@@ -184,8 +184,6 @@ private val Gold=H1Style.Gold
             }
             Row(Modifier.fillMaxWidth().height(39.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("무사즈가 함께하는 좋은 운전 습관",fontSize=11.sp,color=Muted)
-                Spacer(Modifier.weight(1f))
-                Text(if(vm.demo) "PROTOTYPE  ·  주행·참가자·보상은 시연 데이터" else "PLEOS LIVE  ·  차량 데이터 수신 확인용",fontSize=10.sp,color=Muted,letterSpacing=.3.sp)
             }
         }
     }
@@ -263,31 +261,7 @@ private val Gold=H1Style.Gold
     }
 }
 
-@Composable private fun Home(vm:ChallengeViewModel) {
-    Column(Modifier.fillMaxSize()) {
-        Text("오늘도, 무사히 함께.",fontSize=38.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1.8).sp)
-        Text("같은 목적지로 향하는 우리. 마지막 10km를 좋은 습관으로 채워요.",
-            fontSize=16.sp,color=Muted,modifier=Modifier.padding(top=5.dp,bottom=16.dp))
-        Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(H1Style.heroBackground)) {
-            ChallengeMap(vm,Modifier.weight(3f).fillMaxHeight())
-            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal=12.dp,vertical=20.dp),
-                horizontalAlignment=Alignment.CenterHorizontally) {
-                ExpressionMascot(DriveMood.ENCOURAGING,Modifier.weight(1f).fillMaxWidth())
-                Text(if(vm.awaitingMapRoute) "내비 경로 확인 중…" else "무사즈와 함께 출발해요",
-                    color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center)
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top=22.dp,bottom=6.dp),verticalAlignment=Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CheckCircle,null,tint=Green,modifier=Modifier.size(18.dp));Text("  출발 전에 참가",fontSize=13.sp,fontWeight=FontWeight.Medium)
-            StepLine();Text("마지막 10km 자동 기록",fontSize=13.sp,color=Muted)
-            StepLine();Text("주차 후 결과와 보상",fontSize=13.sp,color=Muted)
-            Spacer(Modifier.weight(1f));Icon(Icons.Outlined.VerifiedUser,null,Modifier.size(18.dp),tint=Green)
-        }
-    }
-}
-
-@Composable private fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier) {
+@Composable internal fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier) {
     var query by remember { mutableStateOf("") }
     var zoom by remember { mutableFloatStateOf(1f) }
     var confirm by remember { mutableStateOf(false) }
@@ -303,7 +277,7 @@ private val Gold=H1Style.Gold
     val matches = query.isBlank() || searchMatch != null
     val now = rememberChallengeTime()
     val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
-    val participantCount = demoDestinations.first { it.name == "여의도한강공원" }.demoPeers
+    val participantCount = hangangChallenge.demoPeers
     Box(modifier.clipToBounds()) {
         if (showKakao) KakaoChallengeMap(participantCount, deadlineLabel, matches, searchMatch, { kakaoMap=it }, {
             kakaoMap=null
@@ -377,7 +351,7 @@ private val Gold=H1Style.Gold
                     color=Muted,fontSize=13.sp,modifier=Modifier.padding(top=6.dp,bottom=14.dp))
                 Primary("내비에서 검색",enabled=vm.parked && !vm.activeJourney && !vm.awaitingMapRoute) {
                     focus.clearFocus()
-                    vm.searchInNavigation(query)
+                    vm.searchDestination(query)
                 }
             }
         }
@@ -387,7 +361,13 @@ private val Gold=H1Style.Gold
             modifier=Modifier.align(Alignment.BottomStart).padding(20.dp))
     }
     LaunchedEffect(vm.parked) { if(!vm.parked) confirm=false }
-    if (confirm && vm.parked) Modal("이 목적지로 챌린지에 참가할까요?", "여의도 한강공원 · 참가 예시 4명", {confirm=false}) {
+    if (confirm && vm.parked) ChallengeEntryDialog(vm, hangangChallenge) { confirm = false }
+}
+
+@Composable internal fun ChallengeEntryDialog(vm: ChallengeViewModel, destination: Destination, onDismiss: () -> Unit) {
+    val isHangang = destination == hangangChallenge
+    val title = if (isHangang) "여의도 한강공원" else destination.name
+    Modal("이 목적지로 챌린지에 참가할까요?", "$title · 참가 예시 ${destination.demoPeers}명", onDismiss) {
         Text("길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
             color=Muted,modifier=Modifier.padding(bottom=18.dp))
         val beltRequired = !vm.demo && !vm.live.beltConditionMet
@@ -398,7 +378,7 @@ private val Gold=H1Style.Gold
             Spacer(Modifier.height(12.dp))
         }
         if (beltRequired) {
-            OutlinedButton(onClick={confirm=false;vm.navigateToChallengeWithoutJoining()},modifier=Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick={onDismiss();vm.navigateToChallengeWithoutJoining()},modifier=Modifier.fillMaxWidth()) {
                 Text("길 안내만 열기")
             }
             Spacer(Modifier.height(8.dp))
@@ -406,15 +386,24 @@ private val Gold=H1Style.Gold
         if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
             Text("현재 내비 목적지도 한강 챌린지 반경에 포함돼요.", color=Green)
         }
-        RoundConsent(vm, if(vm.demo) "참가 예약 · 내비 시작" else "동의하고 내비 시작", !beltRequired,
+        val action = when {
+            !vm.demo -> "동의하고 내비 시작"
+            isHangang -> "참가 예약 · 내비 시작"
+            else -> "시연 참가 예약"
+        }
+        RoundConsent(vm, action, !beltRequired,
             if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
-                { round -> confirm=false; vm.accept(round) }
+                { round -> onDismiss(); vm.accept(round) }
             } else null) {
-            confirm=false
-            vm.joinMapChallenge(it)
+            onDismiss()
+            if (isHangang) {
+                vm.joinMapChallenge(it)
+            } else if (vm.demo) {
+                vm.selectDestination(destination)
+                vm.accept(it)
+            }
         }
     }
-
 }
 
 @Composable private fun rememberChallengeTime(): Instant {
@@ -747,7 +736,6 @@ private val mileageRewards = listOf(
 @Composable private fun Eyebrow(text:String) { Text(text,fontSize=11.sp,color=Green,fontWeight=FontWeight.Bold,letterSpacing=1.3.sp) }
 @Composable private fun PageTitle(overline:String,title:String,description:String) { Column(Modifier.padding(top=7.dp,bottom=24.dp)) { Text(title,fontSize=32.sp,fontWeight=FontWeight.Bold,letterSpacing=(-.8).sp,modifier=Modifier.padding(top=10.dp));Text(description,fontSize=14.sp,color=Muted,modifier=Modifier.padding(top=9.dp)) } }
 @Composable private fun Tag(text:String,bg:Color,fg:Color) { Text(text,Modifier.clip(RoundedCornerShape(8.dp)).background(bg).padding(horizontal=10.dp,vertical=6.dp),fontSize=11.sp,color=fg,fontWeight=FontWeight.Medium) }
-@Composable private fun StepLine() { Box(Modifier.padding(horizontal=19.dp).width(35.dp).height(1.dp).background(Line)) }
 @Composable private fun Tick(text:String) { Row(Modifier.padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Outlined.CheckCircle,null,tint=Green,modifier=Modifier.size(19.dp));Text(text,fontSize=15.sp,modifier=Modifier.padding(start=10.dp)) } }
 @Composable private fun InfoTile(label:String,value:String,modifier:Modifier) { Column(modifier.clip(RoundedCornerShape(16.dp)).background(Paper).padding(20.dp)) { Text(label,color=Muted,fontSize=12.sp);Text(value,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=10.dp)) } }
 @Composable private fun SmallStat(label:String,value:String) { Column { Text(label,color=Muted,fontSize=11.sp);Text(value,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=7.dp)) } }
