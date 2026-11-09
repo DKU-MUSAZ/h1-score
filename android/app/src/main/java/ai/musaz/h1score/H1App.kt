@@ -125,7 +125,7 @@ private val Gold=H1Style.Gold
             Image(
                 painter = painterResource(R.drawable.app_icon),
                 contentDescription = null,
-                modifier = Modifier.align(Alignment.Start).padding(start = 14.dp).size(56.dp)
+                modifier = Modifier.size(56.dp)
             )
             Spacer(Modifier.height(30.dp))
             Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
