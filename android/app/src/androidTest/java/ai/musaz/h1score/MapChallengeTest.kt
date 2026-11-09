@@ -23,8 +23,9 @@ class MapChallengeTest {
         ui.onNodeWithText("지금 인기 챌린지 스팟").assertIsDisplayed()
         val suggestions = ui.onNode(hasScrollToIndexAction())
         for (spot in listOf("여의도 한강공원", "현대 모터스튜디오 고양", "판교 테크노밸리")) {
-            suggestions.performScrollToNode(hasText(spot))
-            ui.onNodeWithText(spot).assertIsDisplayed()
+            val popularSpot = hasText(spot) and hasText("참가 예시", substring = true)
+            suggestions.performScrollToNode(popularSpot)
+            ui.onNode(popularSpot).assertIsDisplayed()
         }
         ui.onNode(hasSetTextAction()).performTextInput("한강")
         suggestions.performScrollToNode(hasText("“한강” 검색"))

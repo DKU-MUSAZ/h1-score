@@ -6,13 +6,17 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.History
@@ -50,10 +54,11 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
     var showMap by rememberSaveable { mutableStateOf(false) }
+    var editingShortcuts by rememberSaveable { mutableStateOf(false) }
     var selectedSpot by remember { mutableStateOf<Destination?>(null) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
-    val canChoose = vm.parked && !vm.activeJourney && !vm.awaitingMapRoute
+    val canChoose = vm.canChooseDestination
 
     fun hideKeyboard() {
         keyboard?.hide()
@@ -64,6 +69,22 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
         hideKeyboard()
         query = ""
         searching = false
+    }
+
+    fun editShortcuts() {
+        if (!canChoose) return
+        hideKeyboard()
+        editingShortcuts = true
+    }
+
+    fun openShortcut(destination: String) {
+        if (!canChoose) return
+        if (destination.isEmpty()) {
+            editShortcuts()
+        } else {
+            closeSearch()
+            vm.searchDestination(destination)
+        }
     }
 
     fun chooseSpot(spot: Destination) {
@@ -92,6 +113,9 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
 
     BackHandler(enabled = showMap || searching) {
         if (showMap) showMap = false else closeSearch()
+    }
+    LaunchedEffect(canChoose) {
+        if (!canChoose) editingShortcuts = false
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (showMap) {
@@ -127,14 +151,17 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 if (searching) TextButton(onClick = ::closeSearch) { Text("닫기", fontSize = 16.sp) }
             }
             if (searching) {
-                DestinationSuggestions(
-                    recent = vm.recentDestinations,
-                    query = query,
-                    enabled = canChoose,
-                    onSearch = ::searchDestination,
-                    onSpot = ::chooseSpot,
-                    onMap = { hideKeyboard(); showMap = true }
-                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DestinationShortcutRow(vm.destinationShortcuts, canChoose, ::openShortcut, ::editShortcuts)
+                    DestinationSuggestions(
+                        recent = vm.recentDestinations,
+                        query = query,
+                        enabled = canChoose,
+                        onSearch = ::searchDestination,
+                        onSpot = ::chooseSpot,
+                        onMap = { hideKeyboard(); showMap = true }
+                    )
+                }
             } else {
                 val score = vm.collectionProgress.weeklyScoreAverage(LocalDate.now(ChallengeRound.seoul))
                 Column(
@@ -158,6 +185,95 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     if (vm.parked) selectedSpot?.let { spot ->
         ChallengeEntryDialog(vm, spot) { selectedSpot = null }
     }
+    if (searching && editingShortcuts && canChoose) {
+        DestinationShortcutEditor(vm.destinationShortcuts, vm::saveDestinationShortcuts) { editingShortcuts = false }
+    }
+}
+
+@Composable
+private fun DestinationShortcutRow(
+    shortcuts: DestinationShortcuts,
+    enabled: Boolean,
+    onOpen: (String) -> Unit,
+    onEdit: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        DestinationShortcutButton("집", shortcuts.home, Icons.Filled.Home, enabled) { onOpen(shortcuts.home) }
+        DestinationShortcutButton("회사", shortcuts.work, Icons.Filled.Work, enabled) { onOpen(shortcuts.work) }
+        Spacer(Modifier.weight(1f))
+        OutlinedButton(onClick = onEdit, enabled = enabled) { Text("편집") }
+    }
+}
+
+@Composable
+private fun DestinationShortcutButton(
+    label: String,
+    destination: String,
+    icon: ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.widthIn(max = 156.dp),
+        shape = CircleShape,
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = Color(0xFFEAF0F5),
+            contentColor = H1Style.Ink
+        ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            destination.ifEmpty { "미설정" },
+            Modifier.weight(1f, fill = false),
+            color = H1Style.Muted,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun DestinationShortcutEditor(
+    shortcuts: DestinationShortcuts,
+    onSave: (String, String) -> Boolean,
+    onDismiss: () -> Unit
+) {
+    var home by rememberSaveable { mutableStateOf(shortcuts.home) }
+    var work by rememberSaveable { mutableStateOf(shortcuts.work) }
+    var invalid by rememberSaveable { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("목적지 바로가기") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("비워 두고 저장하면 해당 바로가기가 지워져요.")
+                OutlinedTextField(
+                    home, { home = it; invalid = false }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("집 주소 또는 장소") }
+                )
+                OutlinedTextField(
+                    work, { work = it; invalid = false }, Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("회사 주소 또는 장소") }
+                )
+                if (invalid) Text("주소나 장소 이름을 한 줄로 입력해 주세요.", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (onSave(home, work)) onDismiss() else invalid = true }) { Text("저장") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    )
 }
 
 @Composable

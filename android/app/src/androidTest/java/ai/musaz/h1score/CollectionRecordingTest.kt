@@ -9,6 +9,12 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -82,6 +88,45 @@ class CollectionRecordingTest {
             assertEquals(expected, model.recentDestinations)
             assertEquals(expected, ChallengeViewModel(app).recentDestinations)
         }
+    }
+
+    @Test fun destinationShortcutsCanBeSavedReopenedAndRemoved() {
+        val app = isolatedApplication()
+        // This isolated screen has no live speed updates to refresh the parked reading.
+        fun parkedModel() = ChallengeViewModel(app).also {
+            it.receiveVehicle(parkedVehicle().copy(speedAt = Long.MAX_VALUE))
+        }
+        var model by mutableStateOf(ui.runOnIdle { parkedModel() })
+        ui.setContent { MaterialTheme { key(model) { ChallengeHomeScreen(model) } } }
+
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("집").performClick()
+        val home = ui.onNode(hasSetTextAction() and hasText("집 주소 또는 장소"))
+        val work = ui.onNode(hasSetTextAction() and hasText("회사 주소 또는 장소"))
+        home.performTextReplacement("  서울역  ")
+        work.performTextReplacement("시청역")
+        ui.onNodeWithText("저장").performClick()
+        ui.onNodeWithText("목적지 바로가기").assertDoesNotExist()
+
+        ui.runOnIdle {
+            model = parkedModel()
+            assertEquals(DestinationShortcuts("서울역", "시청역"), model.destinationShortcuts)
+        }
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("서울역").assertIsDisplayed()
+        ui.onNodeWithText("시청역").assertIsDisplayed()
+        ui.onNodeWithText("집").performClick()
+        ui.runOnIdle { assertEquals(listOf("서울역"), model.recentDestinations) }
+
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("편집").performClick()
+        home.performTextClearance()
+        ui.onNodeWithText("저장").performClick()
+        ui.runOnIdle { model = parkedModel() }
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("집").performClick()
+        home.assert(!hasText("서울역"))
+        work.assertTextContains("시청역")
     }
 
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),

@@ -23,6 +23,9 @@ val demoDestinations = listOf(
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
 internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
+internal data class DestinationShortcuts(val home: String, val work: String)
+private const val HomeShortcutKey = "destination-shortcut-home"
+private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
 
 class ChallengeViewModel(app: Application): AndroidViewModel(app) {
@@ -46,6 +49,11 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var completed by mutableIntStateOf(0); private set
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
+        private set
+    internal var destinationShortcuts by mutableStateOf(DestinationShortcuts(
+        home = prefs.getString(HomeShortcutKey, "").orEmpty(),
+        work = prefs.getString(WorkShortcutKey, "").orEmpty()
+    ))
         private set
     internal var recordedDistanceMeters by mutableLongStateOf(prefs.getLong(distanceKey(false), 0))
         private set
@@ -150,8 +158,23 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         }
     }
 
+    internal val canChooseDestination get() = parked && !activeJourney && !awaitingMapRoute
+
+    internal fun saveDestinationShortcuts(home: String, work: String): Boolean {
+        val shortcuts = DestinationShortcuts(home.trim(), work.trim())
+        if (!canChooseDestination || shortcuts.home.any(Char::isISOControl) || shortcuts.work.any(Char::isISOControl)) {
+            return false
+        }
+        prefs.edit()
+            .putString(HomeShortcutKey, shortcuts.home.takeIf(String::isNotEmpty))
+            .putString(WorkShortcutKey, shortcuts.work.takeIf(String::isNotEmpty))
+            .apply()
+        destinationShortcuts = shortcuts
+        return true
+    }
+
     internal fun searchDestination(keyword: String) {
-        if (!parked || activeJourney || awaitingMapRoute || keyword.isBlank()) return
+        if (!canChooseDestination || keyword.isBlank()) return
         rememberDestination(keyword)
         searchInNavigation(keyword)
     }
