@@ -1,9 +1,12 @@
 package ai.musaz.h1score
 
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -24,6 +27,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -112,20 +116,39 @@ private val Gold=H1Style.Gold
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
     Row(modifier.background(Paper)) {
-        Column(Modifier.width(92.dp).fillMaxHeight().background(Color.White).padding(vertical=30.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            Box(Modifier.size(52.dp).clip(RoundedCornerShape(17.dp)).background(Ink),contentAlignment=Alignment.Center) {
+        Column(
+            Modifier.width(176.dp).fillMaxHeight().background(Color.White)
+                .padding(start = 8.dp, end = 8.dp, top = 28.dp, bottom = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.align(Alignment.Start).padding(start = 14.dp)
+                .size(56.dp).clip(RoundedCornerShape(17.dp)).background(Ink), contentAlignment = Alignment.Center) {
                 Text("H1",fontSize=26.sp,fontWeight=FontWeight.Black,color=Color.White)
                 Box(Modifier.align(Alignment.BottomCenter).padding(bottom=10.dp).width(22.dp).height(3.dp).background(Mint))
             }
-            Spacer(Modifier.height(46.dp))
-            NavItem("챌린지",Icons.Outlined.Route,display in listOf(Screen.HOME,Screen.JOURNEY,Screen.RESULT),vm.parked) { vm.navigate(if(vm.activeJourney) Screen.JOURNEY else Screen.HOME) }
-            NavItem("내 기록",Icons.Outlined.BarChart,display==Screen.HISTORY,vm.parked) { vm.navigate(Screen.HISTORY) }
-            NavItem("마일리지",Icons.Outlined.CardGiftcard,display==Screen.WALLET,vm.parked) { vm.navigate(Screen.WALLET) }
-            NavItem("배지",Icons.Outlined.WorkspacePremium,display==Screen.BADGES,vm.parked) { vm.navigate(Screen.BADGES) }
-            NavItem("마이페이지",Icons.Outlined.AccountCircle,display==Screen.PROFILE,vm.parked) { vm.navigate(Screen.PROFILE) }
+            Spacer(Modifier.height(30.dp))
+            Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                NavItem(
+                    "챌린지", R.drawable.ic_nav_challenge,
+                    display in listOf(Screen.HOME, Screen.JOURNEY, Screen.RESULT), vm.parked
+                ) { vm.navigate(if (vm.activeJourney) Screen.JOURNEY else Screen.HOME) }
+                NavItem("내 기록", R.drawable.ic_nav_history, display == Screen.HISTORY, vm.parked) {
+                    vm.navigate(Screen.HISTORY)
+                }
+                NavItem("마일리지", R.drawable.ic_nav_mileage, display == Screen.WALLET, vm.parked) {
+                    vm.navigate(Screen.WALLET)
+                }
+                NavItem("배지", R.drawable.ic_nav_badge, display == Screen.BADGES, vm.parked) {
+                    vm.navigate(Screen.BADGES)
+                }
+                NavItem("마이페이지", R.drawable.ic_nav_profile, display == Screen.PROFILE, vm.parked) {
+                    vm.navigate(Screen.PROFILE)
+                }
+            }
             Spacer(Modifier.weight(1f))
-            Text("MUSAZ",color=Muted,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
+            Text("MUSAZ", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.5.sp)
         }
+        VerticalDivider(color = Line)
         Column(Modifier.weight(1f).padding(horizontal=32.dp)) {
             Row(Modifier.fillMaxWidth().height(86.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("H1-score",fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
@@ -216,10 +239,27 @@ private val Gold=H1Style.Gold
     } }
 }
 
-@Composable private fun NavItem(label:String,icon:ImageVector,selected:Boolean,enabled:Boolean,onClick:()->Unit) {
-    Column(Modifier.padding(bottom=13.dp).width(72.dp).clip(RoundedCornerShape(16.dp)).background(if(selected) PaleMint else Color.Transparent).clickable(enabled=enabled,onClick=onClick).padding(vertical=13.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-        Icon(icon,label,Modifier.size(25.dp),tint=if(selected) Green else Muted.copy(alpha=if(enabled) 1f else .4f))
-        Text(label,Modifier.padding(top=7.dp),fontSize=11.sp,color=if(selected) Green else Muted,fontWeight=if(selected) FontWeight.Bold else FontWeight.Normal)
+@Composable private fun NavItem(
+    label: String,
+    @DrawableRes icon: Int,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected && enabled) Color(0xFFD6F7E9) else Color.Transparent)
+            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
+            .alpha(if (enabled) 1f else .45f)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            Image(painterResource(icon), contentDescription = null)
+        }
+        Text(label, fontSize = 16.sp, lineHeight = 20.sp, color = Ink, fontWeight = FontWeight.SemiBold)
     }
 }
 
