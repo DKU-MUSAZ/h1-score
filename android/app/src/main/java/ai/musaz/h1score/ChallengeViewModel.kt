@@ -19,7 +19,7 @@ val demoDestinations = listOf(
     Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 4),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
-enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION }
+enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
 
 class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val connection = PleosConnection(app)
@@ -37,6 +37,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var notice by mutableStateOf<String?>(null)
     var completed by mutableIntStateOf(0); private set
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
+    var nickname by mutableStateOf(prefs.getString("profile-nickname",null) ?: "무사즈 드라이버"); private set
+    fun updateNickname(input: String): Boolean {
+        val value=input.trim()
+        if(!parked || value.isBlank() || value.codePointCount(0,value.length)>16 || value.any { it.isISOControl() }) return false
+        prefs.edit().putString("profile-nickname",value).apply()
+        nickname=value
+        return true
+    }
     private val voice = ChallengeVoice(app)
     var voiceEnabled by mutableStateOf(prefs.getBoolean("voice", false)); private set
     fun toggleVoice() {
@@ -177,18 +185,20 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val resultUnlocked get() = phase == Phase.FINISHED && parked
 
     init {
-        viewModelScope.launch { connection.flow.collect { next ->
-            live=next
-            if (!demo) {
-                if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                    destinationInHangangGroup && next.destinationId != null && !next.arrived) {
-                    awaitingMapRoute = false
-                    routeTimeout?.cancel()
-                    startSession()
-                }
-                consumeLive(next)
+        viewModelScope.launch { connection.flow.collect { receiveVehicle(it) } }
+    }
+
+    internal fun receiveVehicle(next: LiveVehicle) {
+        live=next
+        if (!demo) {
+            if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
+                destinationInHangangGroup && next.destinationId != null && !next.arrived) {
+                awaitingMapRoute = false
+                routeTimeout?.cancel()
+                startSession()
             }
-        } }
+            consumeLive(next)
+        }
     }
     fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute) { connection.stop(); voice.stop() } }
