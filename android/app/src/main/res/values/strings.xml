@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">안운잘부</string>
+    <string name="notification_result_title">%1$s 주행 결과가 준비됐어요</string>
+    <string name="notification_recording_title">%1$s 주행 기록</string>
+</resources>

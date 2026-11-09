@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -70,7 +71,7 @@ private val Gold=H1Style.Gold
 @Composable private fun CompactNavigationPanel(vm: ChallengeViewModel) {
     val waiting = vm.phase == Phase.RESERVED
     Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(24.dp)) {
-        Text("H1-score",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Bold)
+        Text(stringResource(R.string.app_name),color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Bold)
         Spacer(Modifier.height(18.dp))
         Tag(when(vm.phase) {
             Phase.RESERVED -> "참가 예약 완료"
@@ -121,11 +122,11 @@ private val Gold=H1Style.Gold
                 .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(Modifier.align(Alignment.Start).padding(start = 14.dp)
-                .size(56.dp).clip(RoundedCornerShape(17.dp)).background(Ink), contentAlignment = Alignment.Center) {
-                Text("H1",fontSize=26.sp,fontWeight=FontWeight.Black,color=Color.White)
-                Box(Modifier.align(Alignment.BottomCenter).padding(bottom=10.dp).width(22.dp).height(3.dp).background(Mint))
-            }
+            Image(
+                painter = painterResource(R.drawable.app_icon),
+                contentDescription = null,
+                modifier = Modifier.align(Alignment.Start).padding(start = 14.dp).size(56.dp)
+            )
             Spacer(Modifier.height(30.dp))
             Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 NavItem(
@@ -151,8 +152,7 @@ private val Gold=H1Style.Gold
         VerticalDivider(color = Line)
         Column(Modifier.weight(1f).padding(horizontal=32.dp)) {
             Row(Modifier.fillMaxWidth().height(86.dp),verticalAlignment=Alignment.CenterVertically) {
-                Text("H1-score",fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
-                Text("  /  무사히, 함께",color=Muted,fontSize=14.sp)
+                Text(stringResource(R.string.app_name),fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)

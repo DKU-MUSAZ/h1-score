@@ -1,4 +1,4 @@
-# H1-score 화면과 MUSAZ
+# 안운잘부 화면과 MUSAZ
 
 2026-11-05 · 운전 중에는 조용히 기록하고, 도착한 뒤 따뜻하게 피드백하는 방향.
 
@@ -60,6 +60,6 @@
 ## 내비 연결 화면 참고 사례
 
 - [차량 내장 Google Maps](https://support.google.com/maps/answer/9770907?hl=en): 목적지 검색과 경로 안내를 시스템 내비에 맡기는 흐름.
-- [Strava 그룹 챌린지](https://support.strava.com/en-us/articles/15401736-how-do-group-challenges-work-on-strava): 참가 여부와 진행 상황을 같은 챌린지 맥락에서 보여주는 구성. H1-score의 순위는 주차 후 공개한다.
+- [Strava 그룹 챌린지](https://support.strava.com/en-us/articles/15401736-how-do-group-challenges-work-on-strava): 참가 여부와 진행 상황을 같은 챌린지 맥락에서 보여주는 구성. 안운잘부의 순위는 주차 후 공개한다.
 - [Waze 음성 안내](https://support.google.com/waze/answer/10264825?hl=en): 말수를 줄이고 운전 중 핵심 사건에만 짧은 음성을 사용한다.
 - [Pleos NaviHelper](https://document.pleos.ai/docs/pleos-only/connect-sdk-pleos/NaviHelper/intro), [Pleos TTS](https://document.pleos.ai/en/docs/pleos-only/connect-sdk-pleos/TextToSpeech/intro): 내비 경로 읽기와 온디바이스 음성.

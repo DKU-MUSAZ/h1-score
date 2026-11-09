@@ -1,12 +1,12 @@
-# H1-score · 무사즈
+# 안운잘부 · 무사즈
 
-**오늘도, 무사히 함께.** 같은 목적지로 향하는 운전자들이 마지막 10km의 주행 습관을 비교하고, 주차 후 점수·순위·마일리지·배지를 확인하는 Pleos 차량용 앱 프로토타입입니다.
+**안전운전 잘 부탁드립니다.** 같은 목적지로 향하는 운전자들이 마지막 10km의 주행 습관을 비교하고, 주차 후 점수·순위·마일리지·배지를 확인하는 Pleos 차량용 앱 프로토타입입니다.
 
 [실행 안내](docs/prototype/START-HERE.md) · [카카오맵 설정](docs/prototype/ENVIRONMENT.md) · [시연 영상 MP4](docs/media/demo-walkthrough.mp4) · [SDK와 점수 구현](docs/prototype/IMPLEMENTATION.md)
 
 ## 화면 흐름
 
-영상은 아래 에뮬레이터 캡처를 순서대로 묶은 21초 요약입니다. Pleos 내장 내비 화면과 시연용 주행·결과 화면을 구분했습니다.
+영상은 아래 에뮬레이터 캡처를 순서대로 묶은 21초 요약입니다. 촬영 당시 앱 이름과 아이콘이 화면에 남아 있습니다. Pleos 내장 내비 화면과 시연용 주행·결과 화면을 구분했습니다.
 
 | 단계 | 화면 | 운전자가 하는 일 |
 | --- | --- | --- |
@@ -18,7 +18,7 @@
 | 6 | [신규 배지](docs/media/06-demo-badge.png) | 새 배지를 열 때 금색 방패를 든 무사즈를 만납니다. 마일리지 탭에서 정비 혜택 예시와 필요 M을 확인할 수 있습니다. |
 
 <p>
-  <img src="docs/media/01-challenge-map.png" alt="H1-score 챌린지 지도" width="48%">
+  <img src="docs/media/01-challenge-map.png" alt="안운잘부 챌린지 지도" width="48%">
   <img src="docs/media/02-pleos-navigation.png" alt="Pleos 내장 내비의 여의도한강공원 안내" width="48%">
   <img src="docs/media/05-demo-results.png" alt="시연 안전운전 점수와 순위" width="48%">
   <img src="docs/media/06-demo-badge.png" alt="신규 배지를 든 무사즈" width="48%">

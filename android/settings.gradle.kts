@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         }
     }
 }
-rootProject.name = "H1-score"
+rootProject.name = "안운잘부"
 include(":app", ":core")

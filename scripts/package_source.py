@@ -5,7 +5,7 @@ import json
 import zipfile
 
 root = Path(__file__).resolve().parents[1]
-output = root / "artifacts" / "h1-score-source-0.2.0.zip"
+output = root / "artifacts" / "안운잘부-source-0.2.0.zip"
 excluded = {".gradle", ".kotlin", ".idea", "build", ".git", "artifacts", "__pycache__"}
 files = [
     p for p in sorted(root.rglob("*"))
@@ -16,7 +16,7 @@ files = [
 output.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
     for file in files:
-        archive.write(file, Path("h1-score") / file.relative_to(root))
+        archive.write(file, Path("안운잘부") / file.relative_to(root))
 manifest = {
     "version": "0.2.0-prototype",
     "source_archive": output.name,
