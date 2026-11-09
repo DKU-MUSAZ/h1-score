@@ -22,7 +22,7 @@ class MapChallengeTest {
         ui.onNodeWithText("최근 검색한 목적지").assertIsDisplayed()
         ui.onNodeWithText("지금 인기 챌린지 스팟").assertIsDisplayed()
         val suggestions = ui.onNode(hasScrollToIndexAction())
-        for (spot in listOf("여의도 한강공원", "현대 모터스튜디오 고양", "판교 테크노밸리")) {
+        for (spot in listOf("여의도 한강공원", "현대 모터스튜디오 고양", "단국대학교 죽전캠퍼스")) {
             val popularSpot = hasText(spot) and hasText("참가 예시", substring = true)
             suggestions.performScrollToNode(popularSpot)
             ui.onNode(popularSpot).assertIsDisplayed()

@@ -18,7 +18,7 @@ import org.json.JSONArray
 data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
 val demoDestinations = listOf(
     Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 4),
-    Destination("판교 테크노밸리", "경기 성남 · 대왕판교로 접근 구간", 18.6, 32, 2),
+    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 3),
     Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 4),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )

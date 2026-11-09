@@ -368,7 +368,8 @@ private val Gold=H1Style.Gold
     val isHangang = destination == hangangChallenge
     val title = if (isHangang) "여의도 한강공원" else destination.name
     Modal("이 목적지로 챌린지에 참가할까요?", "$title · 참가 예시 ${destination.demoPeers}명", onDismiss) {
-        Text("길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
+        Text(if (vm.demo && !isHangang) "예약 후 ‘시연 주행 재생’을 누르면 가상 주행이 시작돼요. 도착 후 결과를 볼 수 있어요."
+            else "길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
             color=Muted,modifier=Modifier.padding(bottom=18.dp))
         val beltRequired = !vm.demo && !vm.live.beltConditionMet
         if (beltRequired) {
