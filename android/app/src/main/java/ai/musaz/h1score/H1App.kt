@@ -122,6 +122,7 @@ private val Gold=Color(0xFFBC8624)
             NavItem("내 기록",Icons.Outlined.BarChart,display==Screen.HISTORY,vm.parked) { vm.navigate(Screen.HISTORY) }
             NavItem("마일리지",Icons.Outlined.CardGiftcard,display==Screen.WALLET,vm.parked) { vm.navigate(Screen.WALLET) }
             NavItem("배지",Icons.Outlined.WorkspacePremium,display==Screen.BADGES,vm.parked) { vm.navigate(Screen.BADGES) }
+            NavItem("마이페이지",Icons.Outlined.AccountCircle,display==Screen.PROFILE,vm.parked) { vm.navigate(Screen.PROFILE) }
             Spacer(Modifier.weight(1f))
             Text("MUSAZ",color=Muted,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
         }
@@ -146,6 +147,7 @@ private val Gold=Color(0xFFBC8624)
                     Screen.BADGES -> Badges(vm)
                     Screen.HISTORY -> History(vm)
                     Screen.CONNECTION -> ConnectionScreen(vm)
+                    Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
                 }
             }
             Row(Modifier.fillMaxWidth().height(39.dp),verticalAlignment=Alignment.CenterVertically) {

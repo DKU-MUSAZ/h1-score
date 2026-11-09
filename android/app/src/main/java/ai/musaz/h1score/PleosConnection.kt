@@ -28,6 +28,7 @@ import ai.pleos.playground.navi.constants.NaviErrorCode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
 
 internal val hangangVenue = GeoPoint(37.52639977, 126.93360958)
 
@@ -36,9 +37,10 @@ data class LiveVehicle(
     val remainingM: Double? = null, val destinationAt: Long = 0,
     val speedMps: Double? = null, val speedAt: Long = 0,
     val limitKph: Int? = null, val limitAt: Long = 0,
-    val gearPark: Boolean? = null, val uxRestricted: Boolean? = null,
-    val belt: Boolean? = null, val beltWarningOffAt: Long? = null, val brake: Boolean? = null,
-    val turnSignal: String? = null, val odometer: Float? = null,
+    val gearCode: Int? = null, val gearPark: Boolean? = null, val uxRestricted: Boolean? = null,
+    val belt: Boolean? = null, val beltAt: Long = 0, val beltWarningOffAt: Long? = null, val brake: Boolean? = null, val brakeAt: Long = 0,
+    val turnSignal: String? = null, val turnAt: Long = 0,
+    val odometer: Float? = null, val odometerAt: Long = 0,
     val destinationPoint: GeoPoint? = null, val arrivedAt: Instant? = null,
     val arrived: Boolean = false, val routeCancelled: Boolean = false,
     val statuses: Map<String,String> = emptyMap(),
@@ -52,6 +54,26 @@ data class LiveVehicle(
 
 /** Read-only adapter. No synthetic fallback values are emitted on connection failure. */
 class PleosConnection(private val context: Context) {
+    /** Extra read-only telemetry requested only while My Page is visible. */
+    internal suspend fun readProfileEnergy(): ProfileEnergy = kotlinx.coroutines.coroutineScope {
+        val source=vehicle?.takeIf { active } ?: return@coroutineScope ProfileEnergy()
+        val battery=async { profileRead<Int> { ok, fail -> source.getEvBattery().getEvBatteryStateOfCharge(ok,fail) } }
+        val fuel=async { profileRead<Int> { ok, fail -> source.getFuel().getFuelPercent(ok,fail) } }
+        val oil=async { profileRead<String> { ok, fail -> source.getSafety().getEngineOilLevelState({ ok(it?.name) },fail) } }
+        val steering=async { profileRead<Float> { ok, fail -> source.getSteeringWheel().getCurrentSteeringWheelAngle(ok,fail) } }
+        val result=ProfileEnergy(battery.await()?.takeIf { it in 0..100 },fuel.await()?.takeIf { it in 0..100 },oil.await(),steering.await()?.takeIf { it.isFinite() })
+        if(active && vehicle===source) result else ProfileEnergy()
+    }
+
+    private suspend fun <T> profileRead(request: ((T?)->Unit,(Exception)->Unit)->Unit): T? {
+        val response=kotlinx.coroutines.CompletableDeferred<T?>()
+        return kotlinx.coroutines.withTimeoutOrNull(1500) {
+            runCatching { request({ response.complete(it) }, { response.complete(null) }) }
+                .onFailure { response.complete(null) }
+            response.await()
+        }
+    }
+
     private val state = MutableStateFlow(LiveVehicle())
     val flow = state.asStateFlow()
     private val main = Handler(Looper.getMainLooper())
@@ -127,7 +149,7 @@ class PleosConnection(private val context: Context) {
                     properties = connectedCar.getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
                     ux = connectedCar.getCarManager(Car.CAR_UX_RESTRICTION_SERVICE) as CarUxRestrictionsManager
                     status("AAOS", "Car service 연결됨")
-                } else { properties = null; ux = null; state.update { it.copy(speedMps=null,gearPark=null,uxRestricted=null) }; status("AAOS", "연결 해제") }
+                } else { properties = null; ux = null; state.update { it.copy(speedMps=null,gearCode=null,gearPark=null,uxRestricted=null) }; status("AAOS", "연결 해제") }
             }
         }.onFailure { status("AAOS", "사용 불가 · ${it.javaClass.simpleName}") }
         main.post(poll)
@@ -158,9 +180,9 @@ class PleosConnection(private val context: Context) {
                 runCatching {
                     val gear = p.getIntProperty(VehiclePropertyIds.GEAR_SELECTION,0)
                     val restricted = ux?.currentCarUxRestrictions?.isRequiresDistractionOptimization
-                    state.update { it.copy(gearPark=gear==VehicleGear.GEAR_PARK,uxRestricted=restricted) }
+                    state.update { it.copy(gearCode=gear,gearPark=gear==VehicleGear.GEAR_PARK,uxRestricted=restricted) }
                     status("주차 상태", "gear=$gear · UX 제한=$restricted")
-                }.onFailure { state.update { it.copy(gearPark=null,uxRestricted=null) }; status("주차 상태", "미확인 · ${it.javaClass.simpleName}") }
+                }.onFailure { state.update { it.copy(gearCode=null,gearPark=null,uxRestricted=null) }; status("주차 상태", "미확인 · ${it.javaClass.simpleName}") }
             }
             if(naviReady) runCatching { navi?.getDestinationInfo() }
             vehicle?.let { v ->
@@ -184,10 +206,10 @@ class PleosConnection(private val context: Context) {
                         })
                     }.onFailure { state.update { it.copy(beltWarningOffAt = null) } }
                 }
-                if(brakeReady) runCatching { v.getBrake().getCurrentBrakePedalStatus({ b -> state.update { it.copy(brake=b) }; status("Brake", when(b) { true -> "밟음"; false -> "해제"; null -> "미확인" }) }, { status("Brake",it.javaClass.simpleName) }) }
-                if(turnReady) runCatching { v.getTurnSignal().getCurrentTurnSignalState({ t -> state.update { it.copy(turnSignal=t?.name) }; status("TurnSignal",t?.name ?: "미확인") }, { status("TurnSignal",it.javaClass.simpleName) }) }
-                if(odoReady) runCatching { v.getOdometer().getCurrentDistanceDriven({ d -> state.update { it.copy(odometer=d) }; status("Odometer","$d · 원시값") }, { status("Odometer",it.javaClass.simpleName) }) }
-                driverSeat?.let { area -> runCatching { v.getSeat().getCurrentSeatBeltBuckledState(area,{ b -> state.update { it.copy(belt=b) }; status("Seat",when(b) { true -> "버클 잠김"; false -> "버클 열림"; null -> "미확인" }) },{ state.update { it.copy(belt=null) }; status("Seat",it.javaClass.simpleName) }) } }
+                if(brakeReady) runCatching { v.getBrake().getCurrentBrakePedalStatus({ b -> if(active && vehicle===v) state.update { it.copy(brake=b,brakeAt=SystemClock.elapsedRealtime()) }; status("Brake", when(b) { true -> "밟음"; false -> "해제"; null -> "미확인" }) }, { status("Brake",it.javaClass.simpleName) }) }
+                if(turnReady) runCatching { v.getTurnSignal().getCurrentTurnSignalState({ t -> if(active && vehicle===v) state.update { it.copy(turnSignal=t?.name,turnAt=SystemClock.elapsedRealtime()) }; status("TurnSignal",t?.name ?: "미확인") }, { status("TurnSignal",it.javaClass.simpleName) }) }
+                if(odoReady) runCatching { v.getOdometer().getCurrentDistanceDriven({ d -> if(active && vehicle===v) state.update { it.copy(odometer=d,odometerAt=SystemClock.elapsedRealtime()) }; status("Odometer","$d · 원시값") }, { status("Odometer",it.javaClass.simpleName) }) }
+                driverSeat?.let { area -> runCatching { v.getSeat().getCurrentSeatBeltBuckledState(area,{ b -> if(active && vehicle===v) state.update { it.copy(belt=b,beltAt=SystemClock.elapsedRealtime()) }; status("Seat",when(b) { true -> "버클 잠김"; false -> "버클 열림"; null -> "미확인" }) },{ state.update { it.copy(belt=null) }; status("Seat",it.javaClass.simpleName) }) } }
             }
             main.postDelayed(this,1000)
         }
