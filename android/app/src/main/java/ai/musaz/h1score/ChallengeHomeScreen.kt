@@ -102,7 +102,11 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     fun searchDestination(name: String) {
         if (!canChoose || name.isBlank()) return
         val key = name.filter(Char::isLetterOrDigit)
-        val spot = popularSpots.firstOrNull { it.name.filter(Char::isLetterOrDigit).equals(key, ignoreCase = true) }
+        val spot = popularSpots.singleOrNull {
+            val spotKey = it.name.filter(Char::isLetterOrDigit)
+            spotKey.equals(key, ignoreCase = true) ||
+                (vm.demo && key.length >= 2 && spotKey.startsWith(key, ignoreCase = true))
+        }
         if (spot != null) {
             chooseSpot(spot)
         } else {

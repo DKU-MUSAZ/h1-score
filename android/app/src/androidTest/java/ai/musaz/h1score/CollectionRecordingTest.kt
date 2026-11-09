@@ -129,6 +129,27 @@ class CollectionRecordingTest {
         work.assertTextContains("시청역")
     }
 
+    @Test fun demoSearchFindsDankookUniversityWithoutTheCampusSuffix() {
+        val app = isolatedApplication()
+        val model = ui.runOnIdle {
+            ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle().copy(speedAt = Long.MAX_VALUE))
+                switchSource()
+            }
+        }
+        ui.setContent { MaterialTheme { ChallengeHomeScreen(model) } }
+
+        val search = ui.onNode(hasSetTextAction())
+        search.performClick()
+        search.performTextInput("단국대학교")
+        val result = hasText("“단국대학교” 검색")
+        ui.onNode(hasScrollToIndexAction()).performScrollToNode(result)
+        ui.onNode(result).performClick()
+
+        ui.onNodeWithText("시연 참가 예약").assertExists()
+        ui.runOnIdle { assertEquals(listOf("단국대학교 죽전캠퍼스"), model.recentDestinations) }
+    }
+
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
         gearPark = true, uxRestricted = false, belt = true)
 
