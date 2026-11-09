@@ -37,14 +37,14 @@ import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private val Ink=Color(0xFF152D4C)
-private val Muted=Color(0xFF73818F)
-private val Paper=Color(0xFFF5F6F8)
-private val Line=Color(0xFFE2E7EB)
-private val Mint=Color(0xFF74DFB2)
-private val Green=Color(0xFF176B54)
-private val PaleMint=Color(0xFFEAF7F0)
-private val Gold=Color(0xFFBC8624)
+private val Ink=H1Style.Ink
+private val Muted=H1Style.Muted
+private val Paper=H1Style.Paper
+private val Line=H1Style.Line
+private val Mint=H1Style.Mint
+private val Green=H1Style.Green
+private val PaleMint=H1Style.PaleMint
+private val Gold=H1Style.Gold
 
 @Composable fun H1App(vm: ChallengeViewModel) {
     MaterialTheme(colorScheme=lightColorScheme(primary=Ink,secondary=Green,background=Paper,surface=Color.White,onSurface=Ink)) {
@@ -144,7 +144,16 @@ private val Gold=Color(0xFFBC8624)
                     Screen.JOURNEY -> Journey(vm)
                     Screen.RESULT -> ResultScreen(vm) { badgeReveal=true }
                     Screen.WALLET -> Wallet(vm)
-                    Screen.BADGES -> Badges(vm)
+                    Screen.BADGES -> BadgeCollectionScreen(
+                        legacyOwned = vm.ownedBadges,
+                        rankProgress = vm.rankBadgeProgress,
+                        collectionProgress = vm.collectionProgress,
+                        demo = vm.demo,
+                        trackedSpot = vm.trackedSpot,
+                        onStartSpot = vm::startSpotVisit,
+                        onCancelSpot = vm::cancelSpotVisit,
+                        onChallenge = { vm.navigate(Screen.HOME) }
+                    )
                     Screen.HISTORY -> History(vm)
                     Screen.CONNECTION -> ConnectionScreen(vm)
                     Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
@@ -220,7 +229,7 @@ private val Gold=Color(0xFFBC8624)
         Text("같은 목적지로 향하는 우리. 마지막 10km를 좋은 습관으로 채워요.",
             fontSize=16.sp,color=Muted,modifier=Modifier.padding(top=5.dp,bottom=16.dp))
         Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFE9EFE5),Color(0xFFE7EFF2))))) {
+            .background(H1Style.heroBackground)) {
             ChallengeMap(vm,Modifier.weight(3f).fillMaxHeight())
             Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal=12.dp,vertical=20.dp),
                 horizontalAlignment=Alignment.CenterHorizontally) {
@@ -526,6 +535,7 @@ private val mileageRewards = listOf(
 
 @Composable private fun Wallet(vm:ChallengeViewModel) {
     var selected by remember { mutableStateOf<MileageReward?>(null) }
+    var showOilVoucher by remember { mutableStateOf(false) }
     val next = mileageRewards.firstOrNull { it.id !in vm.redeemedRewards }
     val available = mileageRewards.count { it.cost <= vm.balance && it.id !in vm.redeemedRewards }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -542,7 +552,13 @@ private val mileageRewards = listOf(
                 Text("시연에서만 사용하는 마일리지",color=Color(0xFFBDCCDA),fontSize=13.sp,modifier=Modifier.padding(top=8.dp))
             }
         }
-        Text("차량 관리 혜택",fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=19.dp,bottom=10.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("차량 관리 혜택", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = { showOilVoucher = true }) { Text("엔진오일 교환권 안내") }
+        }
         mileageRewards.forEachIndexed { index, reward ->
             val received = reward.id in vm.redeemedRewards
             val short = (reward.cost-vm.balance).coerceAtLeast(0)
@@ -563,6 +579,9 @@ private val mileageRewards = listOf(
             }
         }
     }
+    if (showOilVoucher && vm.parked) {
+        MonthlyOilVoucherInfo(onDismiss = { showOilVoucher = false })
+    }
     selected?.takeIf { vm.parked }?.let { reward ->
         val received=reward.id in vm.redeemedRewards
         val short=(reward.cost-vm.balance).coerceAtLeast(0)
@@ -570,26 +589,6 @@ private val mileageRewards = listOf(
             Text("필요 마일리지 ${reward.cost} M   /   내 잔액 ${vm.balance} M",fontSize=18.sp,modifier=Modifier.padding(bottom=20.dp))
             Primary(when { received -> "시연 교환 완료"; short>0 -> "${short} M 더 필요"; else -> "${reward.cost} M으로 시연 교환" },
                 enabled=!received && short==0) { vm.redeemDemoReward(reward) }
-        }
-    }
-}
-
-@Composable private fun Badges(vm:ChallengeViewModel) {
-    Row(Modifier.fillMaxSize(),horizontalArrangement=Arrangement.spacedBy(26.dp)) {
-        Column(Modifier.weight(.85f).fillMaxHeight().clip(RoundedCornerShape(26.dp)).background(Color(0xFFF3EEEA)).padding(26.dp)) {
-            Tag("내 배지 컬렉션",Color.White,Green)
-            Text("나의 무사한\n순간들.",fontSize=36.sp,lineHeight=46.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=14.dp))
-            ExpressionMascot(DriveMood.ENCOURAGING,Modifier.weight(1f).fillMaxWidth())
-            Text("조금씩 모이는 좋은 운전의 흔적",fontSize=13.sp,color=Muted)
-        }
-        Column(Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-            PageTitle("BADGE COLLECTION","작은 성취를 모아봐요","배지를 위한 추가 이동은 필요 없어요")
-            val earned=vm.ownedBadges.contains("first-drive")
-            BadgeRow("첫 무사 도착","첫 유효 주행 기록을 완성했어요",earned,Icons.Outlined.VerifiedUser,Gold)
-            BadgeRow("첫 발자국","${vm.ownedBadges.count { it.startsWith("visit:") }}곳에 남긴 첫 방문 기록",vm.ownedBadges.any { it.startsWith("visit:") },Icons.Outlined.LocationOn,Green)
-            BadgeRow("무사 TOP 3","85점 이상으로 그룹 상위 3위",vm.ownedBadges.contains("top-three"),Icons.Outlined.EmojiEvents,Color(0xFF8263A4))
-            BadgeRow("무사한 습관","준비 중 · 85점 이상 유효 기록 5회",false,Icons.Outlined.Eco,Green)
-            BadgeRow("꾸준한 무사즈","준비 중 · 서로 다른 7일의 유효 기록",false,Icons.Outlined.CalendarToday,Ink)
         }
     }
 }
@@ -714,13 +713,6 @@ private val mileageRewards = listOf(
 @Composable private fun SmallStat(label:String,value:String) { Column { Text(label,color=Muted,fontSize=11.sp);Text(value,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=7.dp)) } }
 @Composable private fun MetricBar(label:String,value:Int,note:String) { Row { Text(label,fontSize=13.sp,fontWeight=FontWeight.Medium);Text("  $note",fontSize=11.sp,color=Muted);Spacer(Modifier.weight(1f));Text("$value",fontSize=13.sp,fontWeight=FontWeight.Bold,color=Green) };LinearProgressIndicator(progress={value/100f},modifier=Modifier.fillMaxWidth().padding(top=9.dp).height(6.dp).clip(CircleShape),color=Green,trackColor=PaleMint) }
 
-@Composable private fun BadgeRow(name:String,description:String,earned:Boolean,icon:ImageVector,color:Color) {
-    Row(Modifier.fillMaxWidth().padding(bottom=12.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(15.dp),verticalAlignment=Alignment.CenterVertically) {
-        Box(Modifier.size(49.dp).background(if(earned) color.copy(alpha=.12f) else Paper,RoundedCornerShape(14.dp)),contentAlignment=Alignment.Center) { Icon(icon,null,tint=if(earned) color else Muted.copy(alpha=.4f),modifier=Modifier.size(27.dp)) }
-        Column(Modifier.weight(1f).padding(start=15.dp)) { Text(name,fontSize=16.sp,fontWeight=FontWeight.Bold,color=if(earned) Ink else Muted);Text(description,fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=4.dp)) }
-        Icon(if(earned) Icons.Outlined.CheckCircle else Icons.Outlined.Lock,null,tint=if(earned) Green else Line,modifier=Modifier.size(20.dp))
-    }
-}
 @Composable private fun EmptyState(title:String,description:String,action:()->Unit) {
     Row(Modifier.fillMaxSize().padding(vertical=42.dp),verticalAlignment=Alignment.CenterVertically,
         horizontalArrangement=Arrangement.spacedBy(36.dp)) {
