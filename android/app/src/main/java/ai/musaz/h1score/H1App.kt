@@ -117,8 +117,8 @@ private val Gold=H1Style.Gold
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
     Row(modifier.background(Paper)) {
         Column(
-            Modifier.width(176.dp).fillMaxHeight().background(Color.White)
-                .padding(start = 8.dp, end = 8.dp, top = 28.dp, bottom = 26.dp),
+            Modifier.width(152.dp).fillMaxHeight().background(Color.White)
+                .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(Modifier.align(Alignment.Start).padding(start = 14.dp)
@@ -252,11 +252,11 @@ private val Gold=H1Style.Gold
             .background(if (selected && enabled) Color(0xFFD6F7E9) else Color.Transparent)
             .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
             .alpha(if (enabled) 1f else .45f)
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(11.dp),
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
             Image(painterResource(icon), contentDescription = null)
         }
         Text(label, fontSize = 16.sp, lineHeight = 20.sp, color = Ink, fontWeight = FontWeight.SemiBold)
