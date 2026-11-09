@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 
 private val ProfileInk=Color(0xFF152D4C)
@@ -59,7 +60,15 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
         "운전석 안전벨트" to vehicle(live.belt.takeIf { observedAt-live.beltAt in 0..2500 })?.let { if(it) "착용" else "미착용" },
         "브레이크 페달" to vehicle(live.brake.takeIf { observedAt-live.brakeAt in 0..2500 })?.let { if(it) "밟음" else "해제" },
         "방향지시등" to when(vehicle(live.turnSignal.takeIf { observedAt-live.turnAt in 0..1500 })) { "LEFT"->"좌측";"RIGHT"->"우측";"OFF"->"꺼짐";else->null },
-        "앞바퀴 조향각" to vehicle(energy.steering)?.let { "%.1f°".format(it) },
+        "핸들 각도" to vehicle(energy.steering)?.let { angle ->
+            val magnitude = "%.1f°".format(abs(angle))
+            // Pleos Vehicle reports clockwise steering-wheel rotation as negative.
+            when {
+                abs(angle) < 0.05f -> "중앙 · 0.0°"
+                angle < 0f -> "우측 · $magnitude"
+                else -> "좌측 · $magnitude"
+            }
+        },
         "누적 주행거리" to vehicle(live.odometer.takeIf { observedAt-live.odometerAt in 0..5000 })?.let { "%,.1f km".format(it) },
         "전기차 배터리" to vehicle(energy.battery)?.let { "$it%" },
         "연료 잔량" to vehicle(energy.fuel)?.let { "$it%" },
