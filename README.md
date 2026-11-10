@@ -4,6 +4,19 @@
 
 [실행 안내](docs/prototype/START-HERE.md) · [카카오맵 설정](docs/prototype/ENVIRONMENT.md) · [시연 영상 MP4](docs/media/demo-walkthrough.mp4) · [SDK와 점수 구현](docs/prototype/IMPLEMENTATION.md)
 
+## 처음 시작하기
+
+설치 후 주차 상태에서 **앱 소개 → 데이터 이용 안내·동의 → 닉네임 → 5단계 기능 안내**를 진행합니다. 안내를 완료하거나 건너뛰면 다음 실행부터 자동으로 다시 표시하지 않습니다.
+
+다시 테스트하려면 **마이페이지 → 처음 설정 다시 보기 → 다시 시작**을 누르세요. 안내 상태만 초기화하고 주행 기록·마일리지·배지·저장한 목적지·닉네임은 유지합니다.
+
+[최초 설정·튜토리얼 시연 영상 (약 100초)](docs/media/first-run/walkthrough.mp4) · [구현 범위·검증 기록](docs/verification/2026-11-10-drive-ui.md)
+
+<p>
+  <img src="docs/media/first-run/welcome.png" alt="무사즈 최초 소개" width="48%">
+  <img src="docs/media/first-run/spotlight.png" alt="검색창만 밝게 강조하는 튜토리얼" width="48%">
+</p>
+
 ## 화면 흐름
 
 영상은 아래 에뮬레이터 캡처를 순서대로 묶은 21초 요약입니다. 촬영 당시 앱 이름과 아이콘이 화면에 남아 있습니다. Pleos 내장 내비 화면과 시연용 주행·결과 화면을 구분했습니다.

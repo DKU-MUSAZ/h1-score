@@ -133,7 +133,7 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it; searching = true },
-                    modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) searching = true },
+                    modifier = Modifier.weight(1f).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
                     enabled = canChoose,
                     singleLine = true,
                     shape = RoundedCornerShape(30.dp),

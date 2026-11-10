@@ -28,6 +28,7 @@ import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -162,10 +163,10 @@ private val Gold=H1Style.Gold
                     Screen.RESULT -> "챌린지 결과"
                     Screen.HISTORY -> "내 기록"
                     Screen.WALLET -> "마일리지"
-                    Screen.BADGES -> "배지"
+                    Screen.BADGES -> "배지 컬렉션"
                     Screen.PROFILE -> "마이페이지"
                     Screen.CONNECTION -> "연결 상태"
-                },color=Ink,fontWeight=FontWeight.SemiBold,fontSize=22.sp,letterSpacing=(-.6).sp)
+                },modifier=Modifier.semantics { heading() },color=Ink,fontWeight=FontWeight.Bold,fontSize=32.sp,letterSpacing=(-.8).sp)
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
@@ -258,7 +259,7 @@ private val Gold=H1Style.Gold
     onClick: () -> Unit
 ) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 72.dp)
+        Modifier.fillMaxWidth().heightIn(min = 72.dp).tutorialTarget("nav-$label")
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected && enabled) Color(0xFFD6F7E9) else Color.Transparent)
             .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
@@ -538,77 +539,10 @@ private val Gold=H1Style.Gold
     }
 }
 
-internal data class MileageReward(val id:String,val title:String,val cost:Int)
-private val mileageRewards = listOf(
-    MileageReward("wiper","와이퍼 교환",80),
-    MileageReward("filter","에어컨 필터 교환",300),
-    MileageReward("oil","엔진오일 교환",600),
-)
-
-@Composable private fun Wallet(vm:ChallengeViewModel) {
-    var selected by remember { mutableStateOf<MileageReward?>(null) }
-    var showOilVoucher by remember { mutableStateOf(false) }
-    val next = mileageRewards.firstOrNull { it.id !in vm.redeemedRewards }
-    val available = mileageRewards.count { it.cost <= vm.balance && it.id !in vm.redeemedRewards }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Text("마일리지 사용",fontSize=32.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(bottom=16.dp))
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Ink).padding(24.dp),
-            verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(30.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("내 시연 잔액",fontSize=14.sp,color=Mint)
-                Text("${vm.balance} M",fontSize=46.sp,color=Color.White,fontWeight=FontWeight.Bold)
-            }
-            Column(Modifier.weight(1.25f)) {
-                Text(if(available>0) "교환 가능한 혜택 ${available}개" else next?.let { "${it.title}까지 ${it.cost-vm.balance} M" } ?: "모든 시연 혜택을 받았어요",
-                    color=Color.White,fontSize=18.sp,fontWeight=FontWeight.Bold)
-                Text("시연에서만 사용하는 마일리지",color=Color(0xFFBDCCDA),fontSize=13.sp,modifier=Modifier.padding(top=8.dp))
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("차량 관리 혜택", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            TextButton(onClick = { showOilVoucher = true }) { Text("엔진오일 교환권 안내") }
-        }
-        mileageRewards.forEachIndexed { index, reward ->
-            val received = reward.id in vm.redeemedRewards
-            val short = (reward.cost-vm.balance).coerceAtLeast(0)
-            Surface(onClick={selected=reward},color=Color.White,shape=RoundedCornerShape(16.dp),modifier=Modifier.fillMaxWidth().padding(bottom=8.dp)) {
-                Row(Modifier.padding(horizontal=16.dp,vertical=11.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)) {
-                    Box(Modifier.size(44.dp).background(PaleMint,RoundedCornerShape(12.dp)),contentAlignment=Alignment.Center) {
-                        Icon(listOf(Icons.Outlined.WaterDrop,Icons.Outlined.Air,Icons.Outlined.Build)[index],null,tint=Green)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(reward.title,fontSize=17.sp,fontWeight=FontWeight.Bold)
-                        LinearProgressIndicator(progress={if(received) 1f else (vm.balance.toFloat()/reward.cost).coerceIn(0f,1f)},
-                            modifier=Modifier.widthIn(max=290.dp).fillMaxWidth().padding(top=7.dp),color=Green,trackColor=PaleMint)
-                    }
-                    Text("${reward.cost} M",fontSize=17.sp,fontWeight=FontWeight.Bold)
-                    Tag(when { received -> "교환 완료"; short==0 -> "교환 가능"; else -> "${short} M 더 필요" },PaleMint,Green)
-                    Icon(Icons.Outlined.ChevronRight,"혜택 상세",tint=Muted)
-                }
-            }
-        }
-    }
-    if (showOilVoucher && vm.parked) {
-        MonthlyOilVoucherInfo(onDismiss = { showOilVoucher = false })
-    }
-    selected?.takeIf { vm.parked }?.let { reward ->
-        val received=reward.id in vm.redeemedRewards
-        val short=(reward.cost-vm.balance).coerceAtLeast(0)
-        Modal(reward.title,"시연 교환 · 실제 정비 쿠폰은 발급되지 않아요",{selected=null}) {
-            Text("필요 마일리지 ${reward.cost} M   /   내 잔액 ${vm.balance} M",fontSize=18.sp,modifier=Modifier.padding(bottom=20.dp))
-            Primary(when { received -> "시연 교환 완료"; short>0 -> "${short} M 더 필요"; else -> "${reward.cost} M으로 시연 교환" },
-                enabled=!received && short==0) { vm.redeemDemoReward(reward) }
-        }
-    }
-}
-
 @Composable private fun History(vm:ChallengeViewModel) {
     if(vm.report==null) { EmptyState("첫 드라이브를 기다리고 있어요","참가한 이동의 주행습관과 결과를 이곳에 모아드릴게요.") { vm.navigate(Screen.HOME) };return }
     Column {
-        PageTitle("DRIVE JOURNAL","나의 드라이브","이번 실행에서 완성한 최근 기록")
+        Text("이번 실행에서 완성한 최근 기록",color=Muted,fontSize=14.sp,modifier=Modifier.padding(bottom=20.dp))
         Surface(onClick={vm.navigate(Screen.RESULT)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth()) {
             Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
                 Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
@@ -621,7 +555,7 @@ private val mileageRewards = listOf(
 
 @Composable private fun ConnectionScreen(vm:ChallengeViewModel) {
     Column(Modifier.fillMaxSize()) {
-        PageTitle("DEVELOPER VIEW","Pleos 연결 확인","아래 값은 시연 데이터와 분리된 실제 SDK 응답입니다")
+        Text("아래 값은 시연 데이터와 분리된 실제 SDK 응답입니다",color=Muted,fontSize=14.sp,modifier=Modifier.padding(bottom=20.dp))
         Row(horizontalArrangement=Arrangement.spacedBy(16.dp),modifier=Modifier.fillMaxWidth()) {
             InfoTile("Vehicle SDK","2.3.2",Modifier.weight(1f));InfoTile("NaviHelper SDK","3.0.5",Modifier.weight(1f));InfoTile("주차 확인",if(vm.live.parked) "P · UX 허용" else "미확인 / 이동",Modifier.weight(1f))
         }

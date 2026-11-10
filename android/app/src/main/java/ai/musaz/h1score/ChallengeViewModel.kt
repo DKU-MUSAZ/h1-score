@@ -122,6 +122,15 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         recentDestinations = (listOf(name) + recentDestinations.filterNot { it.equals(name, ignoreCase = true) }).take(3)
         prefs.edit().putString("recent-destinations", JSONArray(recentDestinations).toString()).apply()
     }
+    internal var onboardingRevision by mutableIntStateOf(0); private set
+    internal fun restartFirstRun(): Boolean {
+        if(!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle()) return false
+        prefs.edit().remove("first-run-complete-v1").remove("first-run-consent-v1")
+            .remove("first-run-nickname-v1").remove("first-run-consent-at").commit()
+        onboardingRevision++
+        screen=Screen.HOME
+        return true
+    }
     var nickname by mutableStateOf(prefs.getString("profile-nickname",null) ?: "무사즈 드라이버"); private set
     fun updateNickname(input: String): Boolean {
         val value=input.trim()
@@ -379,7 +388,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var uiVisible = false
     private val isEmulator = android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.HARDWARE in listOf("ranchu","goldfish")
     val parked get() = if (demo) !demoMoving && (live.parked || (isEmulator && live.gearPark == null && live.uxRestricted != true && (live.speedMps ?: 0.0) < .1)) else live.parked
-    val destinationName get() = if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
+    private var completedDestinationName: String? = null
+    val destinationName get() = completedDestinationName?.takeIf { phase == Phase.FINISHED } ?: if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
     val distanceKm get() = if(demo) selected.distanceKm else (live.remainingM ?: 0.0)/1000
     val phase get() = session?.phase ?: Phase.IDLE
     val activeJourney get() = phase in listOf(Phase.RESERVED,Phase.RECORDING,Phase.AWAITING_PARK)
@@ -402,7 +412,25 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             consumeSpotVisit(next)
         }
     }
-    fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
+    internal fun openCompletedResult() {
+        if(activeJourney) { screen=Screen.JOURNEY; return }
+        if(report == null || phase != Phase.FINISHED) {
+            CompletedDriveStore(prefs).read()?.let { saved ->
+                demo=saved.demo
+                ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
+                rankBadgeProgress=readRankBadgeProgress(rankBadgeKey)
+                collectionProgress=collectionStore.read(demo)
+                recordedDistanceMeters=prefs.getLong(distanceKey(demo),0)
+                session=saved.session; report=saved.report; ranking=saved.ranking
+                earned=saved.earned; missedDeadline=saved.missedDeadline
+                completedDestinationName=saved.name
+                selected=challengeSpots.firstOrNull {it.venueId==saved.session.venueId} ?: selected
+            }
+        }
+        // The frame/result UI still requires fresh parked telemetry before showing details.
+        screen=Screen.RESULT
+    }
+    fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute && trackedSpot == null) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
@@ -450,6 +478,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         startSession()
     }
     private fun startSession() {
+        RecordingService.clearResult(getApplication())
+        completedDestinationName=null
         val assigned = destinationVenueMatch ?: return
         if (!demo) selected=challengeSpots.first { it.venueId==assigned.venue.id }
         missedDeadline = false
@@ -568,11 +598,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,playerRank,ownedBadges)
         ownedBadges=ownedBadges+pendingBadges.map { it.id }
         prefs.edit().putStringSet(if(demo) "badges-demo" else "badges-live",ownedBadges).apply()
-        if (voiceEnabled && uiVisible && parked && pendingBadges.isNotEmpty())
-            voice.say("무사히 도착했어요. 새 배지 ${pendingBadges.size}개를 받았어요.")
+        if (voiceEnabled && uiVisible && parked)
+            voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
+        completedDestinationName=destinationName
+        CompletedDriveStore(prefs).save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline))
         completed++
         screen=Screen.RESULT
-        if (!uiVisible && parked) RecordingService.notifyResult(getApplication())
+        if (parked) RecordingService.notifyResult(getApplication())
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.stop(); voice.stop() }

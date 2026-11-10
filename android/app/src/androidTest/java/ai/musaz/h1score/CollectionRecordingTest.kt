@@ -193,6 +193,51 @@ class CollectionRecordingTest {
         }
     }
 
+    @Test fun mileageCardsPreserveBalanceAndHeadersAreNotDuplicated() {
+        val app=isolatedApplication()
+        app.prefs.edit().putInt("balance",100).commit()
+        val model=ui.runOnIdle { ChallengeViewModel(app).apply {
+            receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE));switchSource();navigate(Screen.WALLET)
+        } }
+        ui.setContent { H1App(model) }
+        ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
+        ui.onNodeWithText("와이퍼",useUnmergedTree=true).assertIsDisplayed()
+        ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
+        ui.onNodeWithText("엔진오일",useUnmergedTree=true).assertIsDisplayed()
+        val image=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(ui.activity.filesDir,"mileage-redesign.png").outputStream().use {image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+        image.recycle()
+        ui.onNodeWithContentDescription("와이퍼 상세").performClick()
+        ui.onNodeWithText("80 M으로 시연 교환").performClick()
+        ui.runOnIdle {assertEquals(20,model.balance);assertTrue("wiper" in model.redeemedRewards)}
+        ui.onNode(hasText("교환 완료") and hasClickAction()).assertIsNotEnabled()
+        ui.onNodeWithText("닫기").performClick()
+        ui.onNodeWithContentDescription("에어컨 필터 상세").performClick()
+        ui.onNodeWithText("280 M 더 필요").assertIsNotEnabled()
+        ui.onNodeWithText("닫기").performClick()
+        ui.runOnIdle {model.navigate(Screen.PROFILE)}
+        ui.onAllNodes(hasText("마이페이지") and isHeading()).assertCountEquals(1)
+        ui.runOnIdle {model.navigate(Screen.BADGES)}
+        ui.onAllNodesWithText("배지 컬렉션").assertCountEquals(1)
+    }
+
+    @Test fun completedResultRestoresAfterProcessStateLossAndWaitsForFreshPark() {
+        val app=isolatedApplication()
+        val report=ai.musaz.h1score.core.ScoreReport(null,0.0,0.0,0.0,0.0,false,0,0.0)
+        val session=ai.musaz.h1score.core.ChallengeSession("saved-drive","route",900.0,ai.musaz.h1score.core.Phase.FINISHED)
+        CompletedDriveStore(app.prefs).save(CompletedDrive(session,report,"저장된 목적지",false,emptyList(),0,false))
+        ui.runOnIdle {
+            val restored=ChallengeViewModel(app)
+            restored.openCompletedResult()
+            assertEquals(Screen.RESULT,restored.screen)
+            assertEquals(report,restored.report)
+            assertEquals("저장된 목적지",restored.destinationName)
+            assertTrue(!restored.resultUnlocked)
+            restored.receiveVehicle(parkedVehicle())
+            assertTrue(restored.resultUnlocked)
+        }
+    }
+
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
         gearPark = true, uxRestricted = false, belt = true)
 

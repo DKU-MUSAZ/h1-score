@@ -46,6 +46,7 @@ dependencies {
     implementation("ai.pleos.playground:NaviHelper:3.0.5")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.04.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
