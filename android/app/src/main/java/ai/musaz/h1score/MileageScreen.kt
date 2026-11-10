@@ -54,7 +54,7 @@ private fun mileage(value:Int)=String.format(Locale.KOREA,"%,d",value)
                     Text(" M",color=Color(0xFFBCEADB),fontSize=24.sp,modifier=Modifier.padding(bottom=7.dp))
                 }
                 Text("시연 잔액",color=Color(0xFFCAD8E5),fontSize=12.sp)
-                Image(painterResource(R.drawable.musaz_challenge_home),null,Modifier.fillMaxWidth().height(150.dp).padding(top=10.dp),contentScale=ContentScale.Fit)
+                Image(painterResource(R.drawable.musaz_mileage),null,Modifier.fillMaxWidth().height(150.dp).padding(top=10.dp),contentScale=ContentScale.Fit)
                 Text("안전하게 달린 만큼,\n내 차도 기분 좋게",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold,lineHeight=27.sp)
                 Spacer(Modifier.height(18.dp))
                 Surface(color=Color(0xFF294A65),shape=RoundedCornerShape(16.dp)) {

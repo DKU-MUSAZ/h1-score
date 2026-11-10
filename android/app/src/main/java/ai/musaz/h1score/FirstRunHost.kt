@@ -118,7 +118,7 @@ private val tourSteps=listOf(
                     Text("안운잘부",color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold)
                     Text("좋은 운전 습관,\n무사즈와 함께.",color=Color.White,fontSize=32.sp,lineHeight=42.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=26.dp))
                 }
-                Image(painterResource(R.drawable.musaz_challenge_home),"반갑게 인사하는 무사즈",Modifier.fillMaxWidth().height(250.dp))
+                Image(painterResource(R.drawable.musaz_tutorial_guide),"빨간 신호봉을 들고 안내하는 무사즈",Modifier.fillMaxWidth().height(250.dp))
                 Text("오늘도 무사히, 기분 좋게",color=Color(0xFFBCEADB),fontSize=15.sp)
             }
             Column(Modifier.weight(1f).fillMaxHeight().padding(32.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -193,8 +193,17 @@ private val tourSteps=listOf(
         }
         Surface(Modifier.align(Alignment.CenterEnd).padding(32.dp).widthIn(max=410.dp),shape=RoundedCornerShape(24.dp),color=Color.White,shadowElevation=12.dp) {
             Column(Modifier.padding(28.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-                Text("무사즈의 첫 안내  ${index+1} / ${tourSteps.size}",fontSize=14.sp,color=H1Style.Green,fontWeight=FontWeight.SemiBold)
-                Text(step.title,fontSize=25.sp,lineHeight=33.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("무사즈의 첫 안내  ${index+1} / ${tourSteps.size}",fontSize=14.sp,color=H1Style.Green,fontWeight=FontWeight.SemiBold)
+                        Text(step.title,fontSize=25.sp,lineHeight=33.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)
+                    }
+                    Image(painterResource(R.drawable.musaz_tutorial_guide), null, Modifier.size(64.dp))
+                }
                 Text(step.body,fontSize=17.sp,lineHeight=27.sp,color=H1Style.Muted)
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                     TextButton(onClick=onSkip) {Text("건너뛰기",color=H1Style.Muted)}
