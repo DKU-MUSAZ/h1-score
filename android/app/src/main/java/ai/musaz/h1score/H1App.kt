@@ -122,11 +122,10 @@ private val Gold=H1Style.Gold
                 .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Image(
-                painter = painterResource(R.drawable.app_icon),
-                contentDescription = null,
-                modifier = Modifier.size(56.dp)
-            )
+            Row(Modifier.height(56.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
+                Text("안운잘부",color=Ink,fontSize=18.sp,fontWeight=FontWeight.Bold,letterSpacing=(-.6).sp)
+            }
             Spacer(Modifier.height(30.dp))
             Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 NavItem(
@@ -152,7 +151,7 @@ private val Gold=H1Style.Gold
         VerticalDivider(color = Line)
         Column(Modifier.weight(1f).padding(horizontal=32.dp)) {
             Row(Modifier.fillMaxWidth().height(86.dp),verticalAlignment=Alignment.CenterVertically) {
-                Text(stringResource(R.string.app_name),fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
+                Text("안전운전 잘 부탁드립니다",color=Ink,fontWeight=FontWeight.Medium,fontSize=22.sp,letterSpacing=(-.6).sp)
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
@@ -261,54 +260,34 @@ private val Gold=H1Style.Gold
     }
 }
 
-@Composable internal fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier) {
+@Composable internal fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier, initialSpot: Destination? = null) {
     var query by remember { mutableStateOf("") }
     var zoom by remember { mutableFloatStateOf(1f) }
     var confirm by remember { mutableStateOf(false) }
+    var selectedMapSpot by remember(initialSpot) { mutableStateOf(initialSpot) }
     val application = androidx.compose.ui.platform.LocalContext.current.applicationContext as H1Application
     var showKakao by remember { mutableStateOf(application.kakaoMapEnabled) }
     var kakaoMap by remember { mutableStateOf<com.kakao.vectormap.KakaoMap?>(null) }
     val focus = LocalFocusManager.current
     val canJoin = vm.parked && !vm.activeJourney && !vm.awaitingMapRoute
     val key = query.filter(Char::isLetterOrDigit)
-    val searchMatch = key.takeIf {
-        it.length >= 2 && listOf("여의도한강공원", "서울영등포구여의동로330").any { name -> it in name }
-    }
-    val matches = query.isBlank() || searchMatch != null
+    val matchingSpots = challengeSpots.filter { query.isBlank() ||
+        (it.name + it.area).filter(Char::isLetterOrDigit).contains(key, ignoreCase = true) }
+    val matches = matchingSpots.isNotEmpty()
+    LaunchedEffect(query) { if (query.isNotBlank() && matchingSpots.size == 1) selectedMapSpot = matchingSpots.single() }
     val now = rememberChallengeTime()
     val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
-    val participantCount = hangangChallenge.demoPeers
     Box(modifier.clipToBounds()) {
-        if (showKakao) KakaoChallengeMap(participantCount, deadlineLabel, matches, searchMatch, { kakaoMap=it }, {
+        if (showKakao) KakaoChallengeMap(matchingSpots, selectedMapSpot, deadlineLabel, { kakaoMap=it }, {
             kakaoMap=null
             showKakao=false
         }) {
-            if (canJoin) { focus.clearFocus(); confirm=true }
-        }
-        if (!showKakao) Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
-            detectTransformGestures { _, _, factor, _ -> zoom=(zoom*factor).coerceIn(1f,2.25f) }
-        }.graphicsLayer { scaleX=zoom; scaleY=zoom }) {
-            val w = size.width
-            val h = size.height
-            for (n in 0..8) {
-                val x = w * n / 8
-                drawLine(Color.White.copy(alpha=.8f),Offset(x-w*.18f,0f),Offset(x+w*.22f,h),4.dp.toPx())
-            }
-            for (n in 1..7) {
-                val y = h * n / 8
-                drawLine(Color.White,Offset(0f,y),Offset(w,y-h*.10f),3.dp.toPx())
-            }
-            val river=Path().apply {
-                moveTo(-w*.1f,h*.71f)
-                cubicTo(w*.18f,h*.85f,w*.25f,h*.31f,w*.56f,h*.44f)
-                cubicTo(w*.78f,h*.57f,w*.9f,h*.55f,w*1.1f,h*.29f)
-            }
-            drawPath(river,Color(0xFFA6D4E8),style=Stroke(width=66.dp.toPx()))
+            if (canJoin) { selectedMapSpot=it; focus.clearFocus(); confirm=true }
         }
         Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(18.dp)) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text("챌린지 지도",Modifier.weight(1f),fontSize=21.sp,fontWeight=FontWeight.Bold)
-                Tag(if(showKakao) "카카오맵" else "시연 지도",Color.White,Muted)
+                Tag(if(showKakao) "카카오맵" else "장소 목록",Color.White,Muted)
             }
             OutlinedTextField(query,{query=it},enabled=vm.parked && !vm.activeJourney,singleLine=true,
                 leadingIcon={Icon(Icons.Outlined.Search,null)},
@@ -318,7 +297,7 @@ private val Gold=H1Style.Gold
                     focusedBorderColor=Green,unfocusedBorderColor=Color.Transparent),
                 modifier=Modifier.fillMaxWidth().padding(top=10.dp))
         }
-        Surface(Modifier.align(Alignment.BottomEnd).padding(14.dp),shape=RoundedCornerShape(20.dp),color=Color.White) {
+        if (showKakao) Surface(Modifier.align(Alignment.BottomEnd).padding(14.dp),shape=RoundedCornerShape(20.dp),color=Color.White) {
             Column {
                 IconButton(onClick={
                     if(showKakao) kakaoMap?.moveCamera(com.kakao.vectormap.camera.CameraUpdateFactory.zoomIn())
@@ -330,19 +309,13 @@ private val Gold=H1Style.Gold
                 },enabled=if(showKakao) kakaoMap!=null else zoom>1f) { Icon(Icons.Outlined.Remove,"지도 축소") }
             }
         }
-        if (matches && !showKakao) Column(Modifier.align(Alignment.Center).offset(y=52.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            Text("여의도 한강공원",color=Ink,fontSize=17.sp,fontWeight=FontWeight.Bold,
-                modifier=Modifier.background(Color.White,RoundedCornerShape(12.dp)).padding(horizontal=12.dp,vertical=6.dp))
-            Spacer(Modifier.height(8.dp))
-            Surface(onClick={focus.clearFocus();confirm=true},enabled=vm.parked && !vm.activeJourney && !vm.awaitingMapRoute,
-                modifier=Modifier.size(118.dp).border(5.dp,Color.White,CircleShape),shape=CircleShape,color=Ink) {
-                Column(verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally) {
-                    Text("${participantCount}명",color=Color.White,fontSize=32.sp,fontWeight=FontWeight.Bold)
-                    Text("참여 중 · 시연",color=Mint,fontSize=13.sp)
+        if (!showKakao && matches) Column(Modifier.align(Alignment.Center).padding(top=90.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("지도를 불러오지 못했어요 · 장소 목록", color=Ink)
+            matchingSpots.forEach { spot ->
+                OutlinedButton(onClick={selectedMapSpot=spot;confirm=true}, enabled=canJoin) {
+                    Text("${spot.name} · 참가 예시 ${spot.demoPeers}명")
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Tag(deadlineLabel,Color.White,Ink)
         }
         if (!matches) Surface(Modifier.align(Alignment.Center).padding(top=55.dp),shape=RoundedCornerShape(20.dp),color=Color.White) {
             Column(Modifier.widthIn(max=360.dp).padding(18.dp)) {
@@ -355,13 +328,17 @@ private val Gold=H1Style.Gold
                 }
             }
         }
-        if (!showKakao) Text("한강",color=Color(0xFF245774),fontSize=14.sp,fontWeight=FontWeight.Bold,
-            modifier=Modifier.align(Alignment.CenterEnd).padding(end=18.dp))
         Text("마커를 눌러 챌린지 참가",fontSize=12.sp,color=Ink,
             modifier=Modifier.align(Alignment.BottomStart).padding(20.dp))
     }
     LaunchedEffect(vm.parked) { if(!vm.parked) confirm=false }
-    if (confirm && vm.parked) ChallengeEntryDialog(vm, hangangChallenge) { confirm = false }
+    if (confirm && vm.parked) selectedMapSpot?.let { spot ->
+        if (spot == hangangChallenge || vm.demo) ChallengeEntryDialog(vm, spot) { confirm=false }
+        else Modal(spot.name, "참가 예시 ${spot.demoPeers}명 · 시연 장소", {confirm=false}) {
+            Text("이 장소의 실시간 챌린지는 아직 준비 중이에요. 내비에서 목적지를 검색할 수 있어요.", color=Muted)
+            Primary("내비에서 검색", enabled=canJoin) { confirm=false; vm.searchDestination(spot.name) }
+        }
+    }
 }
 
 @Composable internal fun ChallengeEntryDialog(vm: ChallengeViewModel, destination: Destination, onDismiss: () -> Unit) {
@@ -523,7 +500,7 @@ private val Gold=H1Style.Gold
                 Row { SmallStat("유효 주행","%.1f km".format(report.validDistanceM/1000));Spacer(Modifier.weight(1f));SmallStat("데이터 수신","${(report.coverage*100).roundToInt()}%");Spacer(Modifier.weight(1f));SmallStat("급제동","감점 제외") }
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
-                Row(verticalAlignment=Alignment.CenterVertically) { Text("함께 도착한 무사즈",fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(vm.demo)Tag("시연 ${vm.ranking.size}인",Paper,Muted) }
+                Row(verticalAlignment=Alignment.CenterVertically) { Text("함께 도착한 무사즈",fontSize=19.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));if(vm.demo)Tag("시연 비교조 ${vm.ranking.size}명",Paper,Muted) }
                 Text(if(vm.demo) "같은 회차 · 챌린지 반경 1km" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=16.dp))
                 if(vm.ranking.isEmpty()) {
                     Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center) { Text(if(!vm.demo) "이번 기록은 개인 결과로 확인해요.\n실제 경쟁·보상은 서버 연결 후 제공해요." else if(vm.missedDeadline) "마감 이후에 도착해 개인 기록만 표시해요." else "보상 순위에 필요한 거리·데이터\n조건을 채우지 못했어요.",textAlign=TextAlign.Center,lineHeight=26.sp,color=Muted) }

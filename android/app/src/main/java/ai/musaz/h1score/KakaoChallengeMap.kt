@@ -30,13 +30,12 @@ private val challengeLocation = LatLng.from(hangangVenue.latitude, hangangVenue.
 
 @Composable
 internal fun KakaoChallengeMap(
-    participantCount: Int,
+    spots: List<Destination>,
+    selectedSpot: Destination?,
     deadlineLabel: String,
-    markerVisible: Boolean,
-    searchMatch: String?,
     onReady: (KakaoMap) -> Unit,
     onFailure: () -> Unit,
-    onMarkerClick: () -> Unit,
+    onMarkerClick: (Destination) -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val click by rememberUpdatedState(onMarkerClick)
@@ -45,7 +44,7 @@ internal fun KakaoChallengeMap(
     val handler = remember { Handler(Looper.getMainLooper()) }
     var view by remember { mutableStateOf<MapView?>(null) }
     var map by remember { mutableStateOf<KakaoMap?>(null) }
-    var label by remember { mutableStateOf<Label?>(null) }
+    val labels = remember { mutableMapOf<Label, Destination>() }
 
     DisposableEffect(view, lifecycle) {
         val mapView = view
@@ -73,7 +72,7 @@ internal fun KakaoChallengeMap(
                     }
                 }, object : KakaoMapReadyCallback() {
                     override fun getPosition() = challengeLocation
-                    override fun getZoomLevel() = 15
+                    override fun getZoomLevel() = 10
                     override fun onMapReady(kakaoMap: KakaoMap) {
                         handler.post {
                             if (view === mapView) {
@@ -90,36 +89,33 @@ internal fun KakaoChallengeMap(
             mapView.finish()
         },
     )
-    LaunchedEffect(map, searchMatch) {
+    LaunchedEffect(map, selectedSpot) {
         val readyMap = map ?: return@LaunchedEffect
-        if (searchMatch == null) return@LaunchedEffect
+        val point = selectedSpot?.point ?: return@LaunchedEffect
         delay(300)
-        readyMap.moveCamera(
-            CameraUpdateFactory.newCenterPosition(challengeLocation, 16),
-            CameraAnimation.from(450),
-        )
+        readyMap.moveCamera(CameraUpdateFactory.newCenterPosition(
+            LatLng.from(point.latitude, point.longitude), 15), CameraAnimation.from(450))
     }
-    LaunchedEffect(map, participantCount, deadlineLabel, markerVisible) {
-        label?.remove()
-        label = null
+    LaunchedEffect(map, spots, deadlineLabel) {
+        labels.keys.toList().forEach { it.remove() }
+        labels.clear()
         val readyMap = map ?: return@LaunchedEffect
-        if (markerVisible) {
-            label = readyMap.labelManager?.layer?.addLabel(
-                LabelOptions.from(challengeLocation)
-                    .setStyles(LabelStyle.from(challengeMarker(participantCount, deadlineLabel)).setAnchorPoint(.5f, .5f))
-                    .setClickable(true)
-            )
-            readyMap.setOnLabelClickListener { _, _, tapped ->
-                if (tapped == label) {
-                    handler.post { click() }
-                    true
-                } else false
-            }
+        spots.forEach { spot ->
+            val point = spot.point ?: return@forEach
+            val marker = readyMap.labelManager?.layer?.addLabel(
+                LabelOptions.from(LatLng.from(point.latitude, point.longitude))
+                    .setStyles(LabelStyle.from(challengeMarker(spot.name, spot.demoPeers, deadlineLabel)).setAnchorPoint(.5f, .5f))
+                    .setClickable(true))
+            if (marker != null) labels[marker] = spot
+        }
+        readyMap.setOnLabelClickListener { _, _, tapped ->
+            val spot = labels[tapped]
+            if (spot != null) { handler.post { click(spot) }; true } else false
         }
     }
 }
 
-private fun challengeMarker(participantCount: Int, deadlineLabel: String): Bitmap {
+private fun challengeMarker(name: String, participantCount: Int, deadlineLabel: String): Bitmap {
     val bitmap = Bitmap.createBitmap(344, 344, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val center = 172f
@@ -138,8 +134,8 @@ private fun challengeMarker(participantCount: Int, deadlineLabel: String): Bitma
 
     paint.color = Color.WHITE
     paint.typeface = Typeface.DEFAULT_BOLD
-    paint.textSize = 30f
-    canvas.drawText("여의도 한강공원", center, 106f, paint)
+    paint.textSize = if (name.length > 12) 22f else 28f
+    canvas.drawText(name, center, 106f, paint)
     paint.textSize = 88f
     canvas.drawText("${participantCount}명", center, 191f, paint)
     paint.textSize = 29f

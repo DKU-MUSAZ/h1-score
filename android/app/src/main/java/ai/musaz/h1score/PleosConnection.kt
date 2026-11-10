@@ -112,6 +112,16 @@ class PleosConnection(private val context: Context) {
         override fun onReRouteEnded() { state.update { it.copy(limitKph = null) }; navi?.getDestinationInfo() }
         override fun onError(errorCode: NaviErrorCode) { status("NaviHelper", "대기 / ${errorCode.name}") }
     }
+    fun requestSavedRoute(place: ai.musaz.h1score.core.SavedPlace): Boolean {
+        val helper = navi?.takeIf { naviReady } ?: return false
+        return runCatching {
+            helper.requestRoute(ai.pleos.playground.navi.data.RouteInfo(
+                latitude=place.point.latitude, longitude=place.point.longitude,
+                displayLatitude=null, displayLongitude=null, poiName=place.name,
+                poiId="", poiSubId="", address=""))
+            true
+        }.getOrDefault(false)
+    }
     fun requestChallengeRoute(): Boolean {
         val helper = navi?.takeIf { naviReady } ?: return false
         return runCatching {

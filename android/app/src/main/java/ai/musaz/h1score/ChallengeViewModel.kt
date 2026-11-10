@@ -15,15 +15,18 @@ import java.util.UUID
 import kotlin.math.roundToLong
 import org.json.JSONArray
 
-data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
+data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0, val point: GeoPoint? = null)
 val demoDestinations = listOf(
-    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 4),
-    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 3),
-    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 4),
+    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 18, GeoPoint(37.6661, 126.8224)),
+    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 10, GeoPoint(37.3217, 127.1268)),
+    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 24, hangangVenue),
+    Destination("서울숲", "서울 성동 · 서울숲", 11.2, 25, 9, GeoPoint(37.5445, 127.0374)),
+    Destination("올림픽공원", "서울 송파 · 평화의 광장", 16.3, 32, 6, GeoPoint(37.5207, 127.1155)),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
+internal val challengeSpots get() = demoDestinations.filter { it.demoPeers > 0 && it.point != null }
 internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
-internal data class DestinationShortcuts(val home: String, val work: String)
+internal data class DestinationShortcut(val id: String, val label: String, val place: SavedPlace? = null, val legacyQuery: String = "")
 private const val HomeShortcutKey = "destination-shortcut-home"
 private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
@@ -50,11 +53,59 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
         private set
-    internal var destinationShortcuts by mutableStateOf(DestinationShortcuts(
-        home = prefs.getString(HomeShortcutKey, "").orEmpty(),
-        work = prefs.getString(WorkShortcutKey, "").orEmpty()
-    ))
+    internal var destinationShortcuts by mutableStateOf(readShortcuts())
         private set
+    private fun readShortcuts(): List<DestinationShortcut> = runCatching {
+        val json = prefs.getString("destination-shortcuts-v2", null)
+        if (json == null) listOf(
+            DestinationShortcut("home", "집", legacyQuery=prefs.getString(HomeShortcutKey, "").orEmpty()),
+            DestinationShortcut("work", "회사", legacyQuery=prefs.getString(WorkShortcutKey, "").orEmpty()))
+        else JSONArray(json).let { rows -> List(rows.length()) { index ->
+            val row=rows.getJSONObject(index)
+            DestinationShortcut(row.getString("id"), row.getString("label"),
+                SavedPlace.from(row.optString("name"), GeoPoint(row.optDouble("lat"), row.optDouble("lon"))),
+                row.optString("query"))
+        } }
+    }.getOrElse { listOf(DestinationShortcut("home", "집"), DestinationShortcut("work", "회사")) }
+    private fun writeShortcuts(items: List<DestinationShortcut>) {
+        val rows=JSONArray()
+        items.forEach { item -> rows.put(org.json.JSONObject().apply {
+            put("id",item.id); put("label",item.label); put("query",item.legacyQuery)
+            item.place?.let { put("name",it.name); put("lat",it.point.latitude); put("lon",it.point.longitude) }
+        }) }
+        prefs.edit().putString("destination-shortcuts-v2", rows.toString()).apply()
+        destinationShortcuts=items
+    }
+    internal fun addShortcut(label: String): String? {
+        val clean=shortcutLabel(label) ?: return null
+        if (!canChooseDestination || destinationShortcuts.size >= 10 || destinationShortcuts.any { it.label == clean }) return null
+        val item=DestinationShortcut(UUID.randomUUID().toString(), clean)
+        writeShortcuts(destinationShortcuts + item)
+        return item.id
+    }
+    internal fun renameShortcut(id: String, label: String): Boolean {
+        val clean=shortcutLabel(label) ?: return false
+        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || destinationShortcuts.any { it.id!=id && it.label==clean }) return false
+        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(label=clean) else it })
+        return true
+    }
+    internal fun removeShortcut(id: String) {
+        if (!canChooseDestination) return
+        writeShortcuts(destinationShortcuts.filterNot { it.id==id })
+    }
+    internal val currentNavigationPlace get() = if (!live.routeCancelled && SystemClock.elapsedRealtime()-live.destinationAt in 0..10_000)
+        SavedPlace.from(live.destination.orEmpty(),live.destinationPoint) else null
+    internal fun saveShortcutPlace(id: String, place: SavedPlace): Boolean {
+        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || SavedPlace.from(place.name,place.point)==null) return false
+        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(place=place,legacyQuery="") else it })
+        return true
+    }
+    internal fun navigateShortcut(id: String) {
+        if (!canChooseDestination || !live.parked) return
+        val place=destinationShortcuts.find { it.id==id }?.place ?: return
+        if (connection.requestSavedRoute(place)) { rememberDestination(place.name); openBuiltInNavigation() }
+        else notice="내비 연결을 확인해 주세요. 저장한 목적지는 유지돼요."
+    }
     internal var recordedDistanceMeters by mutableLongStateOf(prefs.getLong(distanceKey(false), 0))
         private set
 
@@ -159,19 +210,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     internal val canChooseDestination get() = parked && !activeJourney && !awaitingMapRoute
-
-    internal fun saveDestinationShortcuts(home: String, work: String): Boolean {
-        val shortcuts = DestinationShortcuts(home.trim(), work.trim())
-        if (!canChooseDestination || shortcuts.home.any(Char::isISOControl) || shortcuts.work.any(Char::isISOControl)) {
-            return false
-        }
-        prefs.edit()
-            .putString(HomeShortcutKey, shortcuts.home.takeIf(String::isNotEmpty))
-            .putString(WorkShortcutKey, shortcuts.work.takeIf(String::isNotEmpty))
-            .apply()
-        destinationShortcuts = shortcuts
-        return true
-    }
 
     internal fun searchDestination(keyword: String) {
         if (!canChooseDestination || keyword.isBlank()) return
@@ -486,6 +524,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             }
         }
         if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
+            // Popularity is a venue-wide count; prototype settlement uses a five-person group.
             val fixtures = listOf(
                 Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
                 Entry("민트 드라이버", 89) to GeoPoint(37.524, 126.934),
@@ -496,7 +535,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             val peers = if (selected.name == "여의도한강공원") {
                 fixtures.filter { (_, point) -> hangangVenue.includes(point) }
             } else fixtures.take(selected.demoPeers)
-            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.map { it.first })
+            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
             earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
             balance=ledger.balance

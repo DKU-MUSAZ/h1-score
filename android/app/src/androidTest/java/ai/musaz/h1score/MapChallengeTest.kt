@@ -10,6 +10,17 @@ import org.junit.Test
 class MapChallengeTest {
     @get:Rule val ui = createAndroidComposeRule<MainActivity>()
 
+    @Test fun popularListShowsOnlyEligibleFixtureCounts() {
+        ui.waitUntil(15_000) { ui.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("참가 예시 24명").assertExists()
+        ui.onNodeWithText("참가 예시 18명").assertExists()
+        ui.onNodeWithText("참가 예시 10명").assertExists()
+        ui.onNodeWithText("참가 예시 9명").assertDoesNotExist()
+        ui.onNodeWithText("참가 예시 6명").assertDoesNotExist()
+        screenshot("popular-spots")
+    }
+
     @Test fun challengeHomeOpensSearchSuggestionsAndExistingMap() {
         fun waitFor(label: String, timeout: Long = 15_000) {
             ui.waitUntil(timeout) { ui.onAllNodesWithText(label, substring=true).fetchSemanticsNodes().isNotEmpty() }
@@ -27,12 +38,15 @@ class MapChallengeTest {
             suggestions.performScrollToNode(popularSpot)
             ui.onNode(popularSpot).assertIsDisplayed()
         }
+        screenshot("popular-spots")
         ui.onNode(hasSetTextAction()).performTextInput("한강")
         suggestions.performScrollToNode(hasText("“한강” 검색"))
         ui.onNodeWithText("“한강” 검색").assertIsDisplayed()
         suggestions.performScrollToNode(hasText("챌린지 지도 보기"))
         ui.onNodeWithText("챌린지 지도 보기").performClick()
         waitFor("챌린지 지도")
+        ui.waitForIdle()
+        screenshot("challenge-map")
         ui.onNodeWithText("목적지 검색으로 돌아가기").performClick()
         ui.onNodeWithText("지금 인기 챌린지 스팟").assertExists()
         ui.onNodeWithText("닫기").performClick()
@@ -44,4 +58,13 @@ class MapChallengeTest {
         waitFor(initialGreeting)
         ui.onNodeWithText(initialGreeting).assertIsDisplayed()
     }
+    private fun screenshot(name: String) {
+        val instrumentation=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val image=instrumentation.uiAutomation.takeScreenshot()
+        java.io.File(ui.activity.filesDir, "$name.png").outputStream().use {
+            image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)
+        }
+        image.recycle()
+    }
+
 }
