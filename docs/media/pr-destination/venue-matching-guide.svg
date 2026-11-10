@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 754" role="img" aria-labelledby="title desc">
+  <title id="title">목적지와 개최지의 1km 반경으로 대회 배정하기</title>
+  <desc id="desc">목적지가 두 반경 안이면 더 가까운 B, 모든 반경 밖이면 일반 길 안내, A 반경에만 들어오면 A 대회 참가.</desc>
+  <style>
+    text { font-family: "Apple SD Gothic Neo","Malgun Gothic","Noto Sans CJK KR",sans-serif; fill:#152d4c }
+    .title { font-size:38px; font-weight:800 }
+    .heading { font-size:34px; font-weight:800 }
+    .detail { font-size:28px; fill:#455c72 }
+    .result { font-size:30px; font-weight:800; fill:#17634f }
+    .label { font-size:25px; font-weight:700 }
+    .zone { fill:#74dfb2; fill-opacity:.23; stroke:#238b71; stroke-width:2.5 }
+    .other { fill:#b0c2d4; fill-opacity:.22; stroke:#7a91a7; stroke-width:2.5; stroke-dasharray:7 5 }
+    .distance { stroke:#152d4c; stroke-width:2.5; stroke-dasharray:5 4 }
+  </style>
+  <rect width="1000" height="754" rx="26" fill="#edf3f6"/>
+  <text x="32" y="55" class="title">목적지에서 가장 가까운 개최지를 찾아요</text>
+  <circle cx="45" cy="98" r="12" class="zone"/>
+  <text x="65" y="107" class="label">개최지 반경 1km</text>
+  <path d="m322 86 12 12-12 12-12-12z" fill="#e27642"/>
+  <text x="345" y="107" class="label">내 목적지</text>
+
+  <rect x="20" y="130" width="960" height="188" rx="20" fill="#fff"/>
+  <circle cx="113" cy="226" r="76" class="other"/>
+  <circle cx="227" cy="226" r="76" class="zone"/>
+  <path d="M113 226H227" class="distance"/>
+  <circle cx="113" cy="226" r="5" fill="#152d4c"/>
+  <circle cx="227" cy="226" r="5" fill="#152d4c"/>
+  <path d="m181.4 215 11 11-11 11-11-11z" fill="#e27642"/>
+  <text x="113" y="266" class="label" text-anchor="middle">A</text>
+  <text x="227" y="266" class="label" text-anchor="middle">B</text>
+  <text x="330" y="182" class="heading">01  두 반경에 모두 포함</text>
+  <text x="330" y="230" class="detail">A까지 0.9km · B까지 0.6km</text>
+  <text x="330" y="279" class="result">더 가까운 B 대회 참가 안내</text>
+
+  <rect x="20" y="332" width="960" height="188" rx="20" fill="#fff"/>
+  <circle cx="113" cy="428" r="76" class="other"/>
+  <path d="M113 428H212" class="distance"/>
+  <circle cx="113" cy="428" r="5" fill="#152d4c"/>
+  <path d="m212 417 11 11-11 11-11-11z" fill="#e27642"/>
+  <text x="113" y="468" class="label" text-anchor="middle">A</text>
+  <text x="330" y="384" class="heading">02  모든 반경 밖</text>
+  <text x="330" y="432" class="detail">가장 가까운 A까지 1.3km</text>
+  <text x="330" y="481" class="result">원래 목적지로 일반 길 안내</text>
+
+  <rect x="20" y="534" width="960" height="188" rx="20" fill="#fff"/>
+  <circle cx="113" cy="630" r="76" class="zone"/>
+  <path d="M113 630H159" class="distance"/>
+  <circle cx="113" cy="630" r="5" fill="#152d4c"/>
+  <path d="m159 619 11 11-11 11-11-11z" fill="#e27642"/>
+  <text x="113" y="670" class="label" text-anchor="middle">A</text>
+  <text x="330" y="586" class="heading">03  한 개최지 반경에 포함</text>
+  <text x="330" y="634" class="detail">A까지 0.6km</text>
+  <text x="330" y="683" class="result">A 대회 참가 안내</text>
+</svg>
