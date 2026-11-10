@@ -2,6 +2,7 @@ package ai.musaz.h1score
 
 import ai.musaz.h1score.core.ChallengeRound
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -44,7 +45,8 @@ import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 import java.util.Locale
 
-private val popularSpots = demoDestinations.filter { it.demoPeers > 0 }
+internal val popularSpots get() = popularChallengeSpots(challengeSpots)
+internal fun popularChallengeSpots(spots: List<Destination>) = spots.filter { it.demoPeers >= 10 }
     .sortedWith(compareByDescending<Destination> { it.demoPeers }.thenBy { it.name })
     .take(3)
 private val HomeStatDiameter = 216.dp
@@ -53,9 +55,10 @@ private val HomeStatDiameter = 216.dp
 internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
+    var mapSpot by remember { mutableStateOf<Destination?>(null) }
     var showMap by rememberSaveable { mutableStateOf(false) }
+    var shortcutId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingShortcuts by rememberSaveable { mutableStateOf(false) }
-    var selectedSpot by remember { mutableStateOf<Destination?>(null) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val canChoose = vm.canChooseDestination
@@ -74,29 +77,23 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     fun editShortcuts() {
         if (!canChoose) return
         hideKeyboard()
+        shortcutId = null
         editingShortcuts = true
     }
 
-    fun openShortcut(destination: String) {
+    fun openShortcut(id: String) {
         if (!canChoose) return
-        if (destination.isEmpty()) {
-            editShortcuts()
-        } else {
-            closeSearch()
-            vm.searchDestination(destination)
-        }
+        val item=vm.destinationShortcuts.find { it.id==id } ?: return
+        if (item.place==null) { editShortcuts(); shortcutId=id }
+        else vm.navigateShortcut(id)
     }
 
     fun chooseSpot(spot: Destination) {
         if (!canChoose) return
-        if (spot == hangangChallenge || vm.demo) {
-            hideKeyboard()
-            vm.rememberDestination(spot.name)
-            selectedSpot = spot
-        } else {
-            closeSearch()
-            vm.searchDestination(spot.name)
-        }
+        hideKeyboard()
+        vm.rememberDestination(spot.name)
+        mapSpot = spot
+        showMap = true
     }
 
     fun searchDestination(name: String) {
@@ -122,19 +119,21 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
         if (!canChoose) editingShortcuts = false
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        DestinationCompetitionCard(vm)
         if (showMap) {
             TextButton(onClick = { showMap = false }) { Text("목적지 검색으로 돌아가기") }
             ChallengeMap(
                 vm,
                 Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                    .background(H1Style.heroBackground)
+                    .background(H1Style.heroBackground),
+                initialSpot = mapSpot
             )
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it; searching = true },
-                    modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) searching = true },
+                    modifier = Modifier.weight(1f).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
                     enabled = canChoose,
                     singleLine = true,
                     shape = RoundedCornerShape(30.dp),
@@ -163,7 +162,7 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                         enabled = canChoose,
                         onSearch = ::searchDestination,
                         onSpot = ::chooseSpot,
-                        onMap = { hideKeyboard(); showMap = true }
+                        onMap = { hideKeyboard(); mapSpot=null; showMap = true }
                     )
                 }
             } else {
@@ -186,17 +185,14 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
             }
         }
     }
-    if (vm.parked) selectedSpot?.let { spot ->
-        ChallengeEntryDialog(vm, spot) { selectedSpot = null }
-    }
     if (searching && editingShortcuts && canChoose) {
-        DestinationShortcutEditor(vm.destinationShortcuts, vm::saveDestinationShortcuts) { editingShortcuts = false }
+        DestinationShortcutEditor(vm, shortcutId) { editingShortcuts = false }
     }
 }
 
 @Composable
 private fun DestinationShortcutRow(
-    shortcuts: DestinationShortcuts,
+    shortcuts: List<DestinationShortcut>,
     enabled: Boolean,
     onOpen: (String) -> Unit,
     onEdit: () -> Unit
@@ -206,9 +202,12 @@ private fun DestinationShortcutRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DestinationShortcutButton("집", shortcuts.home, Icons.Filled.Home, enabled) { onOpen(shortcuts.home) }
-        DestinationShortcutButton("회사", shortcuts.work, Icons.Filled.Work, enabled) { onOpen(shortcuts.work) }
-        Spacer(Modifier.weight(1f))
+        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            shortcuts.forEach { item ->
+                DestinationShortcutButton(item.label, item.place?.name.orEmpty(),
+                    when(item.id) { "home" -> Icons.Filled.Home; "work" -> Icons.Filled.Work; else -> Icons.Outlined.LocationOn }, enabled) { onOpen(item.id) }
+            }
+        }
         OutlinedButton(onClick = onEdit, enabled = enabled) { Text("편집") }
     }
 }
@@ -245,39 +244,6 @@ private fun DestinationShortcutButton(
             overflow = TextOverflow.Ellipsis
         )
     }
-}
-
-@Composable
-private fun DestinationShortcutEditor(
-    shortcuts: DestinationShortcuts,
-    onSave: (String, String) -> Boolean,
-    onDismiss: () -> Unit
-) {
-    var home by rememberSaveable { mutableStateOf(shortcuts.home) }
-    var work by rememberSaveable { mutableStateOf(shortcuts.work) }
-    var invalid by rememberSaveable { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("목적지 바로가기") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("비워 두고 저장하면 해당 바로가기가 지워져요.")
-                OutlinedTextField(
-                    home, { home = it; invalid = false }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("집 주소 또는 장소") }
-                )
-                OutlinedTextField(
-                    work, { work = it; invalid = false }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("회사 주소 또는 장소") }
-                )
-                if (invalid) Text("주소나 장소 이름을 한 줄로 입력해 주세요.", color = MaterialTheme.colorScheme.error)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { if (onSave(home, work)) onDismiss() else invalid = true }) { Text("저장") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
-    )
 }
 
 @Composable
@@ -363,10 +329,11 @@ private fun DestinationSuggestions(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("지금 인기 챌린지 스팟", fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                        Text("시연 데이터", color = H1Style.Muted, fontSize = 13.sp)
+                        Text("10명 이상 · 시연", color = H1Style.Muted, fontSize = 13.sp)
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick = onMap) { Text("챌린지 지도 보기") }
                     }
+                    if (popularSpots.isEmpty()) Text("아직 10명 이상 모인 스팟이 없어요.", color=H1Style.Muted)
                     popularSpots.forEach { spot ->
                         val name = if (spot == hangangChallenge) "여의도 한강공원" else spot.name
                         DestinationRow(name, "참가 예시 ${spot.demoPeers}명", Icons.Outlined.LocationOn, enabled) {

@@ -30,6 +30,8 @@ private val ProfileGreen=Color(0xFF176B54)
 internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val oil: String?=null,val steering: Float?=null)
 
 @Composable internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
+    var replaySetup by remember {mutableStateOf(false)}
+    LaunchedEffect(enabled) {if(!enabled) replaySetup=false}
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var energy by remember { mutableStateOf(ProfileEnergy()) }
@@ -75,7 +77,6 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
         "엔진오일 수위" to when(vehicle(energy.oil)) { "NORMAL"->"정상";"LOW"->"낮음";"CRITICALLY_LOW"->"매우 낮음";"HIGH"->"높음";else->null }
     )
     Column(Modifier.fillMaxSize()) {
-        Text("마이페이지",fontSize=32.sp,fontWeight=FontWeight.Bold,color=ProfileInk)
         Text("내 프로필과 차량 상태를 확인해요",fontSize=14.sp,color=ProfileMuted,modifier=Modifier.padding(top=4.dp,bottom=16.dp))
         Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(20.dp)) {
             Column(Modifier.width(270.dp).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(20.dp)) {
@@ -86,6 +87,11 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
                 OutlinedButton(onClick={draft=vm.nickname;editing=true},enabled=enabled,modifier=Modifier.padding(top=16.dp)) {
                     Icon(Icons.Outlined.Edit,null,Modifier.size(16.dp)); Text("닉네임 변경",Modifier.padding(start=8.dp))
                 }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick={replaySetup=true},enabled=enabled && vm.canChooseDestination && vm.trackedSpot==null) {
+                    Text("처음 설정 다시 보기",fontSize=14.sp)
+                }
+                Text("기록과 마일리지는 그대로 유지돼요",fontSize=11.sp,color=ProfileMuted)
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).verticalScroll(rememberScrollState()).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) {
@@ -111,6 +117,11 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
             }
         }
     }
+    if(replaySetup && enabled) AlertDialog(onDismissRequest={replaySetup=false},containerColor=Color.White,
+        title={Text("처음 안내를 다시 볼까요?")},
+        text={Text("소개·동의·닉네임·튜토리얼을 다시 확인해요. 주행 기록, 마일리지, 배지와 저장한 목적지는 삭제하지 않아요.")},
+        confirmButton={TextButton(onClick={replaySetup=false;vm.restartFirstRun()}) {Text("다시 시작")}},
+        dismissButton={TextButton(onClick={replaySetup=false}) {Text("취소")}})
     if(editing && enabled) {
         val trimmed=draft.trim()
         val valid=trimmed.isNotBlank() && trimmed.codePointCount(0,trimmed.length)<=16 && trimmed.none { it.isISOControl() }

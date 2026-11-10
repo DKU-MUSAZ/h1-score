@@ -27,14 +27,15 @@ class H1Application : Application() {
 class RecordingService : Service() {
     companion object {
         private const val resultId = 11
+        internal const val OPEN_RESULT = "ai.musaz.h1score.OPEN_RESULT"
 
         fun notifyResult(context: Context) {
             if (Build.VERSION.SDK_INT >= 33 &&
                 context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("results", "주행 결과", NotificationManager.IMPORTANCE_DEFAULT))
-            val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            val open = PendingIntent.getActivity(context, resultId, intent, PendingIntent.FLAG_IMMUTABLE)
+            val intent = Intent(context, MainActivity::class.java).setAction(OPEN_RESULT).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val open = PendingIntent.getActivity(context, resultId, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             manager.notify(resultId, Notification.Builder(context, "results")
                 .setSmallIcon(R.drawable.ic_notification_drive)
                 .setContentTitle(context.getString(R.string.notification_result_title, context.getString(R.string.app_name)))

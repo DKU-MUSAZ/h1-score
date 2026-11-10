@@ -15,15 +15,18 @@ import java.util.UUID
 import kotlin.math.roundToLong
 import org.json.JSONArray
 
-data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0)
+data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0, val point: GeoPoint? = null, val venueId: String = name)
 val demoDestinations = listOf(
-    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 4),
-    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 3),
-    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 4),
+    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 18, GeoPoint(37.6661, 126.8224), "goyang-motorstudio"),
+    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 10, GeoPoint(37.3217, 127.1268), "dankook-jukjeon"),
+    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 24, hangangVenue, "yeouido-hangang"),
+    Destination("서울숲", "서울 성동 · 서울숲", 11.2, 25, 9, GeoPoint(37.5445, 127.0374), "seoul-forest"),
+    Destination("올림픽공원", "서울 송파 · 평화의 광장", 16.3, 32, 6, GeoPoint(37.5207, 127.1155), "olympic-park"),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
+internal val challengeSpots get() = demoDestinations.filter { it.point != null }
 internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
-internal data class DestinationShortcuts(val home: String, val work: String)
+internal data class DestinationShortcut(val id: String, val label: String, val place: SavedPlace? = null, val legacyQuery: String = "")
 private const val HomeShortcutKey = "destination-shortcut-home"
 private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
@@ -50,11 +53,59 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
         private set
-    internal var destinationShortcuts by mutableStateOf(DestinationShortcuts(
-        home = prefs.getString(HomeShortcutKey, "").orEmpty(),
-        work = prefs.getString(WorkShortcutKey, "").orEmpty()
-    ))
+    internal var destinationShortcuts by mutableStateOf(readShortcuts())
         private set
+    private fun readShortcuts(): List<DestinationShortcut> = runCatching {
+        val json = prefs.getString("destination-shortcuts-v2", null)
+        if (json == null) listOf(
+            DestinationShortcut("home", "집", legacyQuery=prefs.getString(HomeShortcutKey, "").orEmpty()),
+            DestinationShortcut("work", "회사", legacyQuery=prefs.getString(WorkShortcutKey, "").orEmpty()))
+        else JSONArray(json).let { rows -> List(rows.length()) { index ->
+            val row=rows.getJSONObject(index)
+            DestinationShortcut(row.getString("id"), row.getString("label"),
+                SavedPlace.from(row.optString("name"), GeoPoint(row.optDouble("lat"), row.optDouble("lon"))),
+                row.optString("query"))
+        } }
+    }.getOrElse { listOf(DestinationShortcut("home", "집"), DestinationShortcut("work", "회사")) }
+    private fun writeShortcuts(items: List<DestinationShortcut>) {
+        val rows=JSONArray()
+        items.forEach { item -> rows.put(org.json.JSONObject().apply {
+            put("id",item.id); put("label",item.label); put("query",item.legacyQuery)
+            item.place?.let { put("name",it.name); put("lat",it.point.latitude); put("lon",it.point.longitude) }
+        }) }
+        prefs.edit().putString("destination-shortcuts-v2", rows.toString()).apply()
+        destinationShortcuts=items
+    }
+    internal fun addShortcut(label: String): String? {
+        val clean=shortcutLabel(label) ?: return null
+        if (!canChooseDestination || destinationShortcuts.size >= 10 || destinationShortcuts.any { it.label == clean }) return null
+        val item=DestinationShortcut(UUID.randomUUID().toString(), clean)
+        writeShortcuts(destinationShortcuts + item)
+        return item.id
+    }
+    internal fun renameShortcut(id: String, label: String): Boolean {
+        val clean=shortcutLabel(label) ?: return false
+        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || destinationShortcuts.any { it.id!=id && it.label==clean }) return false
+        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(label=clean) else it })
+        return true
+    }
+    internal fun removeShortcut(id: String) {
+        if (!canChooseDestination) return
+        writeShortcuts(destinationShortcuts.filterNot { it.id==id })
+    }
+    internal val currentNavigationPlace get() = if (!live.routeCancelled && SystemClock.elapsedRealtime()-live.destinationAt in 0..10_000)
+        SavedPlace.from(live.destination.orEmpty(),live.destinationPoint) else null
+    internal fun saveShortcutPlace(id: String, place: SavedPlace): Boolean {
+        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || SavedPlace.from(place.name,place.point)==null) return false
+        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(place=place,legacyQuery="") else it })
+        return true
+    }
+    internal fun navigateShortcut(id: String) {
+        if (!canChooseDestination || !live.parked) return
+        val place=destinationShortcuts.find { it.id==id }?.place ?: return
+        if (connection.requestSavedRoute(place)) { rememberDestination(place.name); openBuiltInNavigation() }
+        else notice="내비 연결을 확인해 주세요. 저장한 목적지는 유지돼요."
+    }
     internal var recordedDistanceMeters by mutableLongStateOf(prefs.getLong(distanceKey(false), 0))
         private set
 
@@ -70,6 +121,15 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         if (!parked || name.isBlank()) return
         recentDestinations = (listOf(name) + recentDestinations.filterNot { it.equals(name, ignoreCase = true) }).take(3)
         prefs.edit().putString("recent-destinations", JSONArray(recentDestinations).toString()).apply()
+    }
+    internal var onboardingRevision by mutableIntStateOf(0); private set
+    internal fun restartFirstRun(): Boolean {
+        if(!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle()) return false
+        prefs.edit().remove("first-run-complete-v1").remove("first-run-consent-v1")
+            .remove("first-run-nickname-v1").remove("first-run-consent-at").commit()
+        onboardingRevision++
+        screen=Screen.HOME
+        return true
     }
     var nickname by mutableStateOf(prefs.getString("profile-nickname",null) ?: "무사즈 드라이버"); private set
     fun updateNickname(input: String): Boolean {
@@ -99,7 +159,20 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var demoRoundStart = Instant.EPOCH
     private var demoStartedAt = 0L
     var missedDeadline by mutableStateOf(false); private set
-    val destinationInHangangGroup get() = live.destinationPoint?.let(hangangVenue::includes) == true
+    internal val destinationVenueMatch get() = nearestEligibleVenue(
+        if (demo) selected.point else currentNavigationPlace?.point,
+        challengeSpots.map { ChallengeVenue(it.venueId, requireNotNull(it.point)) })
+    internal val matchedVenue get() = destinationVenueMatch?.let { match -> challengeSpots.find { it.venueId == match.venue.id } }
+    val destinationInChallengeGroup get() = destinationVenueMatch != null
+    private var requestedVenueId: String? = null
+
+    internal fun continueWithoutChallenge() {
+        if (!canChooseDestination || !live.parked) return
+        if (currentNavigationPlace == null) { notice="내비 목적지 좌표를 기다리고 있어요"; return }
+        openBuiltInNavigation()
+        notice="선택한 목적지로 일반 길 안내를 계속해요"
+    }
+
 
     private fun canJoinRound(round: ChallengeRound): Boolean {
         if (demo || round.contains(Instant.now())) return true
@@ -107,13 +180,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         return false
     }
 
-    fun joinMapChallenge(round: ChallengeRound) {
+    fun joinMapChallenge(round: ChallengeRound, venue: Destination = hangangChallenge) {
+        val venuePlace = SavedPlace.from(venue.name,venue.point) ?: return
         if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !canJoinRound(round)) return
         if (demo) {
-            selectDestination(hangangChallenge)
+            selectDestination(venue)
             accept(round)
             if (activeJourney) {
-                if (live.parked && connection.requestChallengeRoute()) {
+                if (live.parked && connection.requestSavedRoute(venuePlace)) {
                     openBuiltInNavigation()
                 } else {
                     notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
@@ -127,9 +201,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         }
         if (!beginService()) return
         activeRound = round
+        requestedVenueId = venue.venueId
         routeRequestedAt = SystemClock.elapsedRealtime()
         awaitingMapRoute = true
-        if (!connection.requestChallengeRoute()) {
+        if (!connection.requestSavedRoute(venuePlace)) {
             awaitingMapRoute = false
             endService()
             notice = "내비 경로를 요청하지 못했어요. 연결 상태를 확인해 주세요."
@@ -144,10 +219,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         openBuiltInNavigation()
     }
 
-    fun navigateToChallengeWithoutJoining() {
+    fun navigateToChallengeWithoutJoining(venue: Destination = hangangChallenge) {
         if (!parked || activeJourney || awaitingMapRoute) return
-        if (connection.requestChallengeRoute()) openBuiltInNavigation()
-        else searchInNavigation("여의도한강공원")
+        if (connection.requestSavedRoute(SavedPlace.from(venue.name, venue.point) ?: return)) openBuiltInNavigation()
+        else searchInNavigation(venue.name)
     }
 
     fun searchInNavigation(keyword: String) {
@@ -159,19 +234,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     internal val canChooseDestination get() = parked && !activeJourney && !awaitingMapRoute
-
-    internal fun saveDestinationShortcuts(home: String, work: String): Boolean {
-        val shortcuts = DestinationShortcuts(home.trim(), work.trim())
-        if (!canChooseDestination || shortcuts.home.any(Char::isISOControl) || shortcuts.work.any(Char::isISOControl)) {
-            return false
-        }
-        prefs.edit()
-            .putString(HomeShortcutKey, shortcuts.home.takeIf(String::isNotEmpty))
-            .putString(WorkShortcutKey, shortcuts.work.takeIf(String::isNotEmpty))
-            .apply()
-        destinationShortcuts = shortcuts
-        return true
-    }
 
     internal fun searchDestination(keyword: String) {
         if (!canChooseDestination || keyword.isBlank()) return
@@ -326,7 +388,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var uiVisible = false
     private val isEmulator = android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.HARDWARE in listOf("ranchu","goldfish")
     val parked get() = if (demo) !demoMoving && (live.parked || (isEmulator && live.gearPark == null && live.uxRestricted != true && (live.speedMps ?: 0.0) < .1)) else live.parked
-    val destinationName get() = if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
+    private var completedDestinationName: String? = null
+    val destinationName get() = completedDestinationName?.takeIf { phase == Phase.FINISHED } ?: if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
     val distanceKm get() = if(demo) selected.distanceKm else (live.remainingM ?: 0.0)/1000
     val phase get() = session?.phase ?: Phase.IDLE
     val activeJourney get() = phase in listOf(Phase.RESERVED,Phase.RECORDING,Phase.AWAITING_PARK)
@@ -340,7 +403,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         live=next
         if (!demo) {
             if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                destinationInHangangGroup && next.destinationId != null && !next.arrived) {
+                destinationVenueMatch?.venue?.id == requestedVenueId && next.destinationId != null && !next.arrived) {
                 awaitingMapRoute = false
                 routeTimeout?.cancel()
                 startSession()
@@ -349,7 +412,25 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             consumeSpotVisit(next)
         }
     }
-    fun enterForeground() { uiVisible=true; RecordingService.clearResult(getApplication()); connection.start(); if (voiceEnabled) voice.start() }
+    internal fun openCompletedResult() {
+        if(activeJourney) { screen=Screen.JOURNEY; return }
+        if(report == null || phase != Phase.FINISHED) {
+            CompletedDriveStore(prefs).read()?.let { saved ->
+                demo=saved.demo
+                ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
+                rankBadgeProgress=readRankBadgeProgress(rankBadgeKey)
+                collectionProgress=collectionStore.read(demo)
+                recordedDistanceMeters=prefs.getLong(distanceKey(demo),0)
+                session=saved.session; report=saved.report; ranking=saved.ranking
+                earned=saved.earned; missedDeadline=saved.missedDeadline
+                completedDestinationName=saved.name
+                selected=challengeSpots.firstOrNull {it.venueId==saved.session.venueId} ?: selected
+            }
+        }
+        // The frame/result UI still requires fresh parked telemetry before showing details.
+        screen=Screen.RESULT
+    }
+    fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
     fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute && trackedSpot == null) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
@@ -379,11 +460,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         screen=Screen.HOME
     }
     fun accept(round: ChallengeRound) {
-        if(!parked || awaitingMapRoute || activeJourney || !spotRecordingIdle() || !canJoinRound(round)) return
-        if (!demo && !destinationInHangangGroup) {
-            notice = "내비 목적지가 챌린지 장소에서 1km 이내여야 해요."
+        if(!parked || awaitingMapRoute || activeJourney || !spotRecordingIdle()) return
+        if (!demo && currentNavigationPlace == null) { notice="내비 목적지 좌표를 기다리고 있어요"; return }
+        if (!destinationInChallengeGroup) {
+            if (!demo) continueWithoutChallenge() else notice="목적지 1km 안에 개최지가 없어요"
             return
         }
+        if (!canJoinRound(round)) return
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
@@ -395,11 +478,15 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         startSession()
     }
     private fun startSession() {
+        RecordingService.clearResult(getApplication())
+        completedDestinationName=null
+        val assigned = destinationVenueMatch ?: return
+        if (!demo) selected=challengeSpots.first { it.venueId==assigned.venue.id }
         missedDeadline = false
         liveArrivalAt = null
         samples.clear(); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
         remainingM=distanceKm*1000
-        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM).accept(true)
+        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
         screen=Screen.JOURNEY
     }
     fun cancel() {
@@ -486,6 +573,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             }
         }
         if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
+            // Popularity is a venue-wide count; prototype settlement uses a five-person group.
             val fixtures = listOf(
                 Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
                 Entry("민트 드라이버", 89) to GeoPoint(37.524, 126.934),
@@ -496,7 +584,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             val peers = if (selected.name == "여의도한강공원") {
                 fixtures.filter { (_, point) -> hangangVenue.includes(point) }
             } else fixtures.take(selected.demoPeers)
-            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.map { it.first })
+            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
             earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
             balance=ledger.balance
@@ -510,11 +598,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,playerRank,ownedBadges)
         ownedBadges=ownedBadges+pendingBadges.map { it.id }
         prefs.edit().putStringSet(if(demo) "badges-demo" else "badges-live",ownedBadges).apply()
-        if (voiceEnabled && uiVisible && parked && pendingBadges.isNotEmpty())
-            voice.say("무사히 도착했어요. 새 배지 ${pendingBadges.size}개를 받았어요.")
+        if (voiceEnabled && uiVisible && parked)
+            voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
+        completedDestinationName=destinationName
+        CompletedDriveStore(prefs).save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline))
         completed++
         screen=Screen.RESULT
-        if (!uiVisible && parked) RecordingService.notifyResult(getApplication())
+        if (parked) RecordingService.notifyResult(getApplication())
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.stop(); voice.stop() }

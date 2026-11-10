@@ -68,6 +68,7 @@ class CollectionRecordingTest {
         ui.waitUntil(40_000) { model.report != null }
         ui.runOnIdle {
             assertNotNull(model.report?.score)
+            assertEquals(minOf(model.selected.demoPeers, 4) + 1, model.ranking.size)
             val store = CollectionProgressStore(app.prefs)
             assertEquals(1, model.collectionProgress.challengeDays)
             assertEquals(1, store.read(true).challengeDays)
@@ -91,42 +92,53 @@ class CollectionRecordingTest {
     }
 
     @Test fun destinationShortcutsCanBeSavedReopenedAndRemoved() {
-        val app = isolatedApplication()
-        // This isolated screen has no live speed updates to refresh the parked reading.
-        fun parkedModel() = ChallengeViewModel(app).also {
-            it.receiveVehicle(parkedVehicle().copy(speedAt = Long.MAX_VALUE))
-        }
-        var model by mutableStateOf(ui.runOnIdle { parkedModel() })
-        ui.setContent { MaterialTheme { key(model) { ChallengeHomeScreen(model) } } }
-
-        ui.onNode(hasSetTextAction()).performClick()
-        ui.onNodeWithText("집").performClick()
-        val home = ui.onNode(hasSetTextAction() and hasText("집 주소 또는 장소"))
-        val work = ui.onNode(hasSetTextAction() and hasText("회사 주소 또는 장소"))
-        home.performTextReplacement("  서울역  ")
-        work.performTextReplacement("시청역")
-        ui.onNodeWithText("저장").performClick()
-        ui.onNodeWithText("목적지 바로가기").assertDoesNotExist()
-
+        val app=isolatedApplication()
         ui.runOnIdle {
-            model = parkedModel()
-            assertEquals(DestinationShortcuts("서울역", "시청역"), model.destinationShortcuts)
+            fun model()=ChallengeViewModel(app).apply { receiveVehicle(parkedVehicle()) }
+            val vm=model()
+            val id=vm.addShortcut("학교")!!
+            assertNull(vm.addShortcut("학교"))
+            val place=ai.musaz.h1score.core.SavedPlace.from("단국대학교 죽전캠퍼스", ai.musaz.h1score.core.GeoPoint(37.3217,127.1268))!!
+            assertTrue(vm.saveShortcutPlace(id,place))
+            assertEquals(place,model().destinationShortcuts.single { it.id==id }.place)
+            assertTrue(vm.renameShortcut(id,"캠퍼스"))
+            assertEquals("캠퍼스",model().destinationShortcuts.single { it.id==id }.label)
+            vm.receiveVehicle(parkedVehicle().copy(gearPark=false))
+            assertNull(vm.addShortcut("운동장"))
+            vm.removeShortcut(id)
+            assertTrue(vm.destinationShortcuts.any { it.id==id })
+            vm.receiveVehicle(parkedVehicle())
+            vm.removeShortcut(id)
+            assertTrue(model().destinationShortcuts.none { it.id==id })
         }
-        ui.onNode(hasSetTextAction()).performClick()
-        ui.onNodeWithText("서울역").assertIsDisplayed()
-        ui.onNodeWithText("시청역").assertIsDisplayed()
-        ui.onNodeWithText("집").performClick()
-        ui.runOnIdle { assertEquals(listOf("서울역"), model.recentDestinations) }
+    }
 
-        ui.onNode(hasSetTextAction()).performClick()
-        ui.onNodeWithText("편집").performClick()
-        home.performTextClearance()
+    @Test fun popularSpotsUseTenPersonBoundaryAndShareMapData() {
+        val base=hangangChallenge
+        assertEquals(listOf(11,10),popularChallengeSpots(listOf(base.copy(demoPeers=9),base.copy(demoPeers=10),base.copy(demoPeers=11))).map {it.demoPeers})
+        assertTrue(popularChallengeSpots(listOf(base.copy(demoPeers=9))).isEmpty())
+        assertEquals(listOf(24,18,10),popularSpots.map {it.demoPeers})
+        assertTrue(popularSpots.all {it in challengeSpots})
+        assertTrue(challengeSpots.any {it.demoPeers==9})
+    }
+
+    @Test fun customShortcutEditorAddsSchoolAndRequiresRealPlace() {
+        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE)); switchSource() } }
+        ui.setContent { MaterialTheme { DestinationShortcutEditor(vm,null) {} } }
+        ui.onNodeWithText("새 바로가기 이름").performTextInput("학교")
+        ui.onNodeWithText("바로가기 추가").performClick()
+        ui.onNodeWithText("학교 목적지").assertExists()
+        val screenshot=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(ui.activity.filesDir, "shortcut-editor.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)
+        }
+        screenshot.recycle()
+        ui.onNodeWithText("저장").assertIsNotEnabled()
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE,destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
+        ui.waitUntil(3000) { ui.onAllNodesWithText("현재 내비 목적지 선택: 서울역").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performClick()
         ui.onNodeWithText("저장").performClick()
-        ui.runOnIdle { model = parkedModel() }
-        ui.onNode(hasSetTextAction()).performClick()
-        ui.onNodeWithText("집").performClick()
-        home.assert(!hasText("서울역"))
-        work.assertTextContains("시청역")
+        ui.runOnIdle { assertEquals("서울역",vm.destinationShortcuts.single {it.label=="학교"}.place?.name) }
     }
 
     @Test fun demoSearchFindsDankookUniversityWithoutTheCampusSuffix() {
@@ -146,8 +158,84 @@ class CollectionRecordingTest {
         ui.onNode(hasScrollToIndexAction()).performScrollToNode(result)
         ui.onNode(result).performClick()
 
-        ui.onNodeWithText("시연 참가 예약").assertExists()
+        ui.onNodeWithText("챌린지 지도").assertExists()
         ui.runOnIdle { assertEquals(listOf("단국대학교 죽전캠퍼스"), model.recentDestinations) }
+    }
+
+    @Test fun nearestVenueAssignsNonHangangWithoutChangingDestinationAndOutsideOpensNavigation() {
+        val app=isolatedApplication()
+        ui.runOnIdle {
+            val now=Instant.now()
+            val round=ChallengeRound("배정 검증",now.minusSeconds(30),now.plusSeconds(3600))
+            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String)=ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle().copy(destination="사용자가 고른 목적지",destinationId=id,
+                    destinationPoint=point,destinationAt=SystemClock.elapsedRealtime(),remainingM=12000.0))
+            }
+            val venue=challengeSpots.single {it.venueId=="olympic-park"}
+            val a=model(requireNotNull(venue.point),"poi-a")
+            a.accept(round)
+            assertEquals("olympic-park",a.session?.venueId)
+            assertEquals("poi-a",a.session?.destinationId)
+            assertEquals("사용자가 고른 목적지",a.destinationName)
+            val b=model(requireNotNull(venue.point),"poi-b")
+            b.accept(round)
+            assertEquals(a.session?.competitionId,b.session?.competitionId)
+            val outside=model(ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),"seoul-station")
+            val starts=app.navigationLaunches
+            outside.accept(round)
+            assertNull(outside.session)
+            assertEquals("seoul-station",outside.live.destinationId)
+            assertEquals(starts+1,app.navigationLaunches)
+            val invalid=model(ai.musaz.h1score.core.GeoPoint(Double.NaN,0.0),"invalid")
+            invalid.accept(round)
+            assertNull(invalid.session)
+            assertEquals(starts+1,app.navigationLaunches)
+        }
+    }
+
+    @Test fun mileageCardsPreserveBalanceAndHeadersAreNotDuplicated() {
+        val app=isolatedApplication()
+        app.prefs.edit().putInt("balance",100).commit()
+        val model=ui.runOnIdle { ChallengeViewModel(app).apply {
+            receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE));switchSource();navigate(Screen.WALLET)
+        } }
+        ui.setContent { H1App(model) }
+        ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
+        ui.onNodeWithText("와이퍼",useUnmergedTree=true).assertIsDisplayed()
+        ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
+        ui.onNodeWithText("엔진오일",useUnmergedTree=true).assertIsDisplayed()
+        val image=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(ui.activity.filesDir,"mileage-redesign.png").outputStream().use {image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+        image.recycle()
+        ui.onNodeWithContentDescription("와이퍼 상세").performClick()
+        ui.onNodeWithText("80 M으로 시연 교환").performClick()
+        ui.runOnIdle {assertEquals(20,model.balance);assertTrue("wiper" in model.redeemedRewards)}
+        ui.onNode(hasText("교환 완료") and hasClickAction()).assertIsNotEnabled()
+        ui.onNodeWithText("닫기").performClick()
+        ui.onNodeWithContentDescription("에어컨 필터 상세").performClick()
+        ui.onNodeWithText("280 M 더 필요").assertIsNotEnabled()
+        ui.onNodeWithText("닫기").performClick()
+        ui.runOnIdle {model.navigate(Screen.PROFILE)}
+        ui.onAllNodes(hasText("마이페이지") and isHeading()).assertCountEquals(1)
+        ui.runOnIdle {model.navigate(Screen.BADGES)}
+        ui.onAllNodesWithText("배지 컬렉션").assertCountEquals(1)
+    }
+
+    @Test fun completedResultRestoresAfterProcessStateLossAndWaitsForFreshPark() {
+        val app=isolatedApplication()
+        val report=ai.musaz.h1score.core.ScoreReport(null,0.0,0.0,0.0,0.0,false,0,0.0)
+        val session=ai.musaz.h1score.core.ChallengeSession("saved-drive","route",900.0,ai.musaz.h1score.core.Phase.FINISHED)
+        CompletedDriveStore(app.prefs).save(CompletedDrive(session,report,"저장된 목적지",false,emptyList(),0,false))
+        ui.runOnIdle {
+            val restored=ChallengeViewModel(app)
+            restored.openCompletedResult()
+            assertEquals(Screen.RESULT,restored.screen)
+            assertEquals(report,restored.report)
+            assertEquals("저장된 목적지",restored.destinationName)
+            assertTrue(!restored.resultUnlocked)
+            restored.receiveVehicle(parkedVehicle())
+            assertTrue(restored.resultUnlocked)
+        }
     }
 
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
@@ -163,6 +251,7 @@ class CollectionRecordingTest {
         override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = prefs
         override fun startForegroundService(service: Intent): ComponentName? = service.component
         override fun stopService(name: Intent): Boolean = true
-        override fun startActivity(intent: Intent) = Unit
+        var navigationLaunches=0
+        override fun startActivity(intent: Intent) { navigationLaunches++ }
     }
 }

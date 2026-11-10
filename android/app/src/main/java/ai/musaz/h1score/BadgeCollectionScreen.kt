@@ -193,7 +193,7 @@ private val exampleBadgePoints = collectionBadges
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text("배지 컬렉션", Modifier.semantics { heading() }, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Text("차곡차곡 모은 배지", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     if (preview) {
                         Text("예시 기록", Modifier.padding(start = 14.dp), fontSize = 14.sp, color = BadgeSecondaryText)
                     }
