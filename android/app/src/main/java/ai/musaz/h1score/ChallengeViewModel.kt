@@ -15,16 +15,16 @@ import java.util.UUID
 import kotlin.math.roundToLong
 import org.json.JSONArray
 
-data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0, val point: GeoPoint? = null)
+data class Destination(val name: String, val area: String, val distanceKm: Double, val minutes: Int, val demoPeers: Int = 0, val point: GeoPoint? = null, val venueId: String = name)
 val demoDestinations = listOf(
-    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 18, GeoPoint(37.6661, 126.8224)),
-    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 10, GeoPoint(37.3217, 127.1268)),
-    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 24, hangangVenue),
-    Destination("서울숲", "서울 성동 · 서울숲", 11.2, 25, 9, GeoPoint(37.5445, 127.0374)),
-    Destination("올림픽공원", "서울 송파 · 평화의 광장", 16.3, 32, 6, GeoPoint(37.5207, 127.1155)),
+    Destination("현대 모터스튜디오 고양", "경기 고양 · 킨텍스 접근 구간", 12.4, 23, 18, GeoPoint(37.6661, 126.8224), "goyang-motorstudio"),
+    Destination("단국대학교 죽전캠퍼스", "경기 용인 · 죽전캠퍼스", 13.6, 26, 10, GeoPoint(37.3217, 127.1268), "dankook-jukjeon"),
+    Destination("여의도한강공원", "서울 영등포 · 한강 챌린지", 14.0, 28, 24, hangangVenue, "yeouido-hangang"),
+    Destination("서울숲", "서울 성동 · 서울숲", 11.2, 25, 9, GeoPoint(37.5445, 127.0374), "seoul-forest"),
+    Destination("올림픽공원", "서울 송파 · 평화의 광장", 16.3, 32, 6, GeoPoint(37.5207, 127.1155), "olympic-park"),
     Destination("우리 동네 공원", "가까운 이동 · 개인 기록", 3.2, 9),
 )
-internal val challengeSpots get() = demoDestinations.filter { it.demoPeers > 0 && it.point != null }
+internal val challengeSpots get() = demoDestinations.filter { it.point != null }
 internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
 internal data class DestinationShortcut(val id: String, val label: String, val place: SavedPlace? = null, val legacyQuery: String = "")
 private const val HomeShortcutKey = "destination-shortcut-home"
@@ -150,7 +150,20 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var demoRoundStart = Instant.EPOCH
     private var demoStartedAt = 0L
     var missedDeadline by mutableStateOf(false); private set
-    val destinationInHangangGroup get() = live.destinationPoint?.let(hangangVenue::includes) == true
+    internal val destinationVenueMatch get() = nearestEligibleVenue(
+        if (demo) selected.point else currentNavigationPlace?.point,
+        challengeSpots.map { ChallengeVenue(it.venueId, requireNotNull(it.point)) })
+    internal val matchedVenue get() = destinationVenueMatch?.let { match -> challengeSpots.find { it.venueId == match.venue.id } }
+    val destinationInChallengeGroup get() = destinationVenueMatch != null
+    private var requestedVenueId: String? = null
+
+    internal fun continueWithoutChallenge() {
+        if (!canChooseDestination || !live.parked) return
+        if (currentNavigationPlace == null) { notice="내비 목적지 좌표를 기다리고 있어요"; return }
+        openBuiltInNavigation()
+        notice="선택한 목적지로 일반 길 안내를 계속해요"
+    }
+
 
     private fun canJoinRound(round: ChallengeRound): Boolean {
         if (demo || round.contains(Instant.now())) return true
@@ -158,13 +171,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         return false
     }
 
-    fun joinMapChallenge(round: ChallengeRound) {
+    fun joinMapChallenge(round: ChallengeRound, venue: Destination = hangangChallenge) {
+        val venuePlace = SavedPlace.from(venue.name,venue.point) ?: return
         if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !canJoinRound(round)) return
         if (demo) {
-            selectDestination(hangangChallenge)
+            selectDestination(venue)
             accept(round)
             if (activeJourney) {
-                if (live.parked && connection.requestChallengeRoute()) {
+                if (live.parked && connection.requestSavedRoute(venuePlace)) {
                     openBuiltInNavigation()
                 } else {
                     notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
@@ -178,9 +192,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         }
         if (!beginService()) return
         activeRound = round
+        requestedVenueId = venue.venueId
         routeRequestedAt = SystemClock.elapsedRealtime()
         awaitingMapRoute = true
-        if (!connection.requestChallengeRoute()) {
+        if (!connection.requestSavedRoute(venuePlace)) {
             awaitingMapRoute = false
             endService()
             notice = "내비 경로를 요청하지 못했어요. 연결 상태를 확인해 주세요."
@@ -195,10 +210,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         openBuiltInNavigation()
     }
 
-    fun navigateToChallengeWithoutJoining() {
+    fun navigateToChallengeWithoutJoining(venue: Destination = hangangChallenge) {
         if (!parked || activeJourney || awaitingMapRoute) return
-        if (connection.requestChallengeRoute()) openBuiltInNavigation()
-        else searchInNavigation("여의도한강공원")
+        if (connection.requestSavedRoute(SavedPlace.from(venue.name, venue.point) ?: return)) openBuiltInNavigation()
+        else searchInNavigation(venue.name)
     }
 
     fun searchInNavigation(keyword: String) {
@@ -378,7 +393,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         live=next
         if (!demo) {
             if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                destinationInHangangGroup && next.destinationId != null && !next.arrived) {
+                destinationVenueMatch?.venue?.id == requestedVenueId && next.destinationId != null && !next.arrived) {
                 awaitingMapRoute = false
                 routeTimeout?.cancel()
                 startSession()
@@ -417,11 +432,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         screen=Screen.HOME
     }
     fun accept(round: ChallengeRound) {
-        if(!parked || awaitingMapRoute || activeJourney || !spotRecordingIdle() || !canJoinRound(round)) return
-        if (!demo && !destinationInHangangGroup) {
-            notice = "내비 목적지가 챌린지 장소에서 1km 이내여야 해요."
+        if(!parked || awaitingMapRoute || activeJourney || !spotRecordingIdle()) return
+        if (!demo && currentNavigationPlace == null) { notice="내비 목적지 좌표를 기다리고 있어요"; return }
+        if (!destinationInChallengeGroup) {
+            if (!demo) continueWithoutChallenge() else notice="목적지 1km 안에 개최지가 없어요"
             return
         }
+        if (!canJoinRound(round)) return
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
@@ -433,11 +450,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         startSession()
     }
     private fun startSession() {
+        val assigned = destinationVenueMatch ?: return
+        if (!demo) selected=challengeSpots.first { it.venueId==assigned.venue.id }
         missedDeadline = false
         liveArrivalAt = null
         samples.clear(); report=null; ranking=emptyList(); earned=0; lastSampleAt=0; pendingBadges=emptyList()
         remainingM=distanceKm*1000
-        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM).accept(true)
+        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
         screen=Screen.JOURNEY
     }
     fun cancel() {

@@ -162,6 +162,37 @@ class CollectionRecordingTest {
         ui.runOnIdle { assertEquals(listOf("단국대학교 죽전캠퍼스"), model.recentDestinations) }
     }
 
+    @Test fun nearestVenueAssignsNonHangangWithoutChangingDestinationAndOutsideOpensNavigation() {
+        val app=isolatedApplication()
+        ui.runOnIdle {
+            val now=Instant.now()
+            val round=ChallengeRound("배정 검증",now.minusSeconds(30),now.plusSeconds(3600))
+            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String)=ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle().copy(destination="사용자가 고른 목적지",destinationId=id,
+                    destinationPoint=point,destinationAt=SystemClock.elapsedRealtime(),remainingM=12000.0))
+            }
+            val venue=challengeSpots.single {it.venueId=="olympic-park"}
+            val a=model(requireNotNull(venue.point),"poi-a")
+            a.accept(round)
+            assertEquals("olympic-park",a.session?.venueId)
+            assertEquals("poi-a",a.session?.destinationId)
+            assertEquals("사용자가 고른 목적지",a.destinationName)
+            val b=model(requireNotNull(venue.point),"poi-b")
+            b.accept(round)
+            assertEquals(a.session?.competitionId,b.session?.competitionId)
+            val outside=model(ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),"seoul-station")
+            val starts=app.navigationLaunches
+            outside.accept(round)
+            assertNull(outside.session)
+            assertEquals("seoul-station",outside.live.destinationId)
+            assertEquals(starts+1,app.navigationLaunches)
+            val invalid=model(ai.musaz.h1score.core.GeoPoint(Double.NaN,0.0),"invalid")
+            invalid.accept(round)
+            assertNull(invalid.session)
+            assertEquals(starts+1,app.navigationLaunches)
+        }
+    }
+
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
         gearPark = true, uxRestricted = false, belt = true)
 
@@ -175,6 +206,7 @@ class CollectionRecordingTest {
         override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = prefs
         override fun startForegroundService(service: Intent): ComponentName? = service.component
         override fun stopService(name: Intent): Boolean = true
-        override fun startActivity(intent: Intent) = Unit
+        var navigationLaunches=0
+        override fun startActivity(intent: Intent) { navigationLaunches++ }
     }
 }

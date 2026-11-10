@@ -11,6 +11,8 @@ data class ChallengeSession(
     val initialDistanceM: Double,
     val phase: Phase = Phase.IDLE,
     val startCount: Int = 0,
+    val venueId: String? = null,
+    val competitionId: String? = null,
 ) {
     val rankingEligible: Boolean get() = initialDistanceM >= 10_000
     fun accept(parked: Boolean): ChallengeSession = if (!parked || phase != Phase.IDLE) this else

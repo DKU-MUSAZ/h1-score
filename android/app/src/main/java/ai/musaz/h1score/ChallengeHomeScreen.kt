@@ -119,6 +119,7 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
         if (!canChoose) editingShortcuts = false
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        DestinationCompetitionCard(vm)
         if (showMap) {
             TextButton(onClick = { showMap = false }) { Text("목적지 검색으로 돌아가기") }
             ChallengeMap(

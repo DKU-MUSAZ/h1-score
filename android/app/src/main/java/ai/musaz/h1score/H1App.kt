@@ -92,11 +92,14 @@ private val Gold=H1Style.Gold
             Spacer(Modifier.height(14.dp))
             when {
                 vm.demo && vm.activeJourney -> Button(onClick=vm::runDemo) { Text("시연 주행 재생") }
+                !vm.activeJourney && !vm.demo && vm.hasLiveRoute && vm.currentNavigationPlace != null && !vm.destinationInChallengeGroup -> {
+                    Button(onClick=vm::continueWithoutChallenge) { Text("일반 내비로 계속") }
+                }
                 !vm.activeJourney && !vm.demo && vm.hasLiveRoute -> {
                     var invite by remember { mutableStateOf(false) }
                     Button(onClick={invite=true}) { Text("참가 예약") }
                     if (invite) Modal("이번 드라이브 참가", vm.destinationName, { invite=false }) {
-                        RoundConsent(vm, "참가 예약", vm.destinationInHangangGroup && vm.live.beltConditionMet) {
+                        RoundConsent(vm, "참가 예약", vm.destinationInChallengeGroup && vm.live.beltConditionMet) {
                             invite=false
                             vm.accept(it)
                         }
@@ -122,8 +125,10 @@ private val Gold=H1Style.Gold
                 .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(Modifier.height(56.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
+            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(34.dp), contentAlignment=Alignment.Center) {
+                    Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
+                }
                 Text("안운잘부",color=Ink,fontSize=18.sp,fontWeight=FontWeight.Bold,letterSpacing=(-.6).sp)
             }
             Spacer(Modifier.height(30.dp))
@@ -151,7 +156,16 @@ private val Gold=H1Style.Gold
         VerticalDivider(color = Line)
         Column(Modifier.weight(1f).padding(horizontal=32.dp)) {
             Row(Modifier.fillMaxWidth().height(86.dp),verticalAlignment=Alignment.CenterVertically) {
-                Text("안전운전 잘 부탁드립니다",color=Ink,fontWeight=FontWeight.Medium,fontSize=22.sp,letterSpacing=(-.6).sp)
+                Text(when(display) {
+                    Screen.HOME -> "챌린지"
+                    Screen.JOURNEY -> "주행 기록"
+                    Screen.RESULT -> "챌린지 결과"
+                    Screen.HISTORY -> "내 기록"
+                    Screen.WALLET -> "마일리지"
+                    Screen.BADGES -> "배지"
+                    Screen.PROFILE -> "마이페이지"
+                    Screen.CONNECTION -> "연결 상태"
+                },color=Ink,fontWeight=FontWeight.SemiBold,fontSize=22.sp,letterSpacing=(-.6).sp)
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
@@ -333,11 +347,7 @@ private val Gold=H1Style.Gold
     }
     LaunchedEffect(vm.parked) { if(!vm.parked) confirm=false }
     if (confirm && vm.parked) selectedMapSpot?.let { spot ->
-        if (spot == hangangChallenge || vm.demo) ChallengeEntryDialog(vm, spot) { confirm=false }
-        else Modal(spot.name, "참가 예시 ${spot.demoPeers}명 · 시연 장소", {confirm=false}) {
-            Text("이 장소의 실시간 챌린지는 아직 준비 중이에요. 내비에서 목적지를 검색할 수 있어요.", color=Muted)
-            Primary("내비에서 검색", enabled=canJoin) { confirm=false; vm.searchDestination(spot.name) }
-        }
+        ChallengeEntryDialog(vm, spot) { confirm=false }
     }
 }
 
@@ -356,13 +366,13 @@ private val Gold=H1Style.Gold
             Spacer(Modifier.height(12.dp))
         }
         if (beltRequired) {
-            OutlinedButton(onClick={onDismiss();vm.navigateToChallengeWithoutJoining()},modifier=Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick={onDismiss();vm.navigateToChallengeWithoutJoining(destination)},modifier=Modifier.fillMaxWidth()) {
                 Text("길 안내만 열기")
             }
             Spacer(Modifier.height(8.dp))
         }
-        if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
-            Text("현재 내비 목적지도 한강 챌린지 반경에 포함돼요.", color=Green)
+        if (!vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired) {
+            Text("현재 목적지는 ${vm.matchedVenue?.name} 대회에 배정돼요.", color=Green)
         }
         val action = when {
             !vm.demo -> "동의하고 내비 시작"
@@ -370,16 +380,11 @@ private val Gold=H1Style.Gold
             else -> "시연 참가 예약"
         }
         RoundConsent(vm, action, !beltRequired,
-            if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
+            if (!vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired) {
                 { round -> onDismiss(); vm.accept(round) }
             } else null) {
             onDismiss()
-            if (isHangang) {
-                vm.joinMapChallenge(it)
-            } else if (vm.demo) {
-                vm.selectDestination(destination)
-                vm.accept(it)
-            }
+            vm.joinMapChallenge(it, destination)
         }
     }
 }
@@ -395,7 +400,7 @@ private val Gold=H1Style.Gold
     return now
 }
 
-@Composable private fun RoundConsent(
+@Composable internal fun RoundConsent(
     vm: ChallengeViewModel,
     action: String,
     enabled: Boolean,
