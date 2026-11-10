@@ -1,9 +1,12 @@
 package ai.musaz.h1score
 
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -23,7 +26,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -37,14 +42,14 @@ import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private val Ink=Color(0xFF152D4C)
-private val Muted=Color(0xFF73818F)
-private val Paper=Color(0xFFF5F6F8)
-private val Line=Color(0xFFE2E7EB)
-private val Mint=Color(0xFF74DFB2)
-private val Green=Color(0xFF176B54)
-private val PaleMint=Color(0xFFEAF7F0)
-private val Gold=Color(0xFFBC8624)
+private val Ink=H1Style.Ink
+private val Muted=H1Style.Muted
+private val Paper=H1Style.Paper
+private val Line=H1Style.Line
+private val Mint=H1Style.Mint
+private val Green=H1Style.Green
+private val PaleMint=H1Style.PaleMint
+private val Gold=H1Style.Gold
 
 @Composable fun H1App(vm: ChallengeViewModel) {
     MaterialTheme(colorScheme=lightColorScheme(primary=Ink,secondary=Green,background=Paper,surface=Color.White,onSurface=Ink)) {
@@ -66,7 +71,7 @@ private val Gold=Color(0xFFBC8624)
 @Composable private fun CompactNavigationPanel(vm: ChallengeViewModel) {
     val waiting = vm.phase == Phase.RESERVED
     Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(24.dp)) {
-        Text("H1-score",color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Bold)
+        Text(stringResource(R.string.app_name),color=Color.White,fontSize=23.sp,fontWeight=FontWeight.Bold)
         Spacer(Modifier.height(18.dp))
         Tag(when(vm.phase) {
             Phase.RESERVED -> "참가 예약 완료"
@@ -112,24 +117,42 @@ private val Gold=Color(0xFFBC8624)
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
     Row(modifier.background(Paper)) {
-        Column(Modifier.width(92.dp).fillMaxHeight().background(Color.White).padding(vertical=30.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            Box(Modifier.size(52.dp).clip(RoundedCornerShape(17.dp)).background(Ink),contentAlignment=Alignment.Center) {
-                Text("H1",fontSize=26.sp,fontWeight=FontWeight.Black,color=Color.White)
-                Box(Modifier.align(Alignment.BottomCenter).padding(bottom=10.dp).width(22.dp).height(3.dp).background(Mint))
+        Column(
+            Modifier.width(152.dp).fillMaxHeight().background(Color.White)
+                .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Image(
+                painter = painterResource(R.drawable.app_icon),
+                contentDescription = null,
+                modifier = Modifier.size(56.dp)
+            )
+            Spacer(Modifier.height(30.dp))
+            Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                NavItem(
+                    "챌린지", R.drawable.ic_nav_challenge,
+                    display in listOf(Screen.HOME, Screen.JOURNEY, Screen.RESULT), vm.parked
+                ) { vm.navigate(if (vm.activeJourney) Screen.JOURNEY else Screen.HOME) }
+                NavItem("내 기록", R.drawable.ic_nav_history, display == Screen.HISTORY, vm.parked) {
+                    vm.navigate(Screen.HISTORY)
+                }
+                NavItem("마일리지", R.drawable.ic_nav_mileage, display == Screen.WALLET, vm.parked) {
+                    vm.navigate(Screen.WALLET)
+                }
+                NavItem("배지", R.drawable.ic_nav_badge, display == Screen.BADGES, vm.parked) {
+                    vm.navigate(Screen.BADGES)
+                }
+                NavItem("마이페이지", R.drawable.ic_nav_profile, display == Screen.PROFILE, vm.parked) {
+                    vm.navigate(Screen.PROFILE)
+                }
             }
-            Spacer(Modifier.height(46.dp))
-            NavItem("챌린지",Icons.Outlined.Route,display in listOf(Screen.HOME,Screen.JOURNEY,Screen.RESULT),vm.parked) { vm.navigate(if(vm.activeJourney) Screen.JOURNEY else Screen.HOME) }
-            NavItem("내 기록",Icons.Outlined.BarChart,display==Screen.HISTORY,vm.parked) { vm.navigate(Screen.HISTORY) }
-            NavItem("마일리지",Icons.Outlined.CardGiftcard,display==Screen.WALLET,vm.parked) { vm.navigate(Screen.WALLET) }
-            NavItem("배지",Icons.Outlined.WorkspacePremium,display==Screen.BADGES,vm.parked) { vm.navigate(Screen.BADGES) }
-            NavItem("마이페이지",Icons.Outlined.AccountCircle,display==Screen.PROFILE,vm.parked) { vm.navigate(Screen.PROFILE) }
             Spacer(Modifier.weight(1f))
-            Text("MUSAZ",color=Muted,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp)
+            Text("MUSAZ", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.5.sp)
         }
+        VerticalDivider(color = Line)
         Column(Modifier.weight(1f).padding(horizontal=32.dp)) {
             Row(Modifier.fillMaxWidth().height(86.dp),verticalAlignment=Alignment.CenterVertically) {
-                Text("H1-score",fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
-                Text("  /  무사히, 함께",color=Muted,fontSize=14.sp)
+                Text(stringResource(R.string.app_name),fontWeight=FontWeight.ExtraBold,fontSize=27.sp,letterSpacing=(-1).sp)
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
@@ -140,11 +163,20 @@ private val Gold=Color(0xFFBC8624)
             }
             AnimatedContent(targetState=display,modifier=Modifier.weight(1f),transitionSpec={ (fadeIn(tween(220))+slideInHorizontally { it/25 }) togetherWith fadeOut(tween(120)) },label="screen") { screen ->
                 when(screen) {
-                    Screen.HOME -> Home(vm)
+                    Screen.HOME -> ChallengeHomeScreen(vm)
                     Screen.JOURNEY -> Journey(vm)
                     Screen.RESULT -> ResultScreen(vm) { badgeReveal=true }
                     Screen.WALLET -> Wallet(vm)
-                    Screen.BADGES -> Badges(vm)
+                    Screen.BADGES -> BadgeCollectionScreen(
+                        legacyOwned = vm.ownedBadges,
+                        rankProgress = vm.rankBadgeProgress,
+                        collectionProgress = vm.collectionProgress,
+                        demo = vm.demo,
+                        trackedSpot = vm.trackedSpot,
+                        onStartSpot = vm::startSpotVisit,
+                        onCancelSpot = vm::cancelSpotVisit,
+                        onChallenge = { vm.navigate(Screen.HOME) }
+                    )
                     Screen.HISTORY -> History(vm)
                     Screen.CONNECTION -> ConnectionScreen(vm)
                     Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
@@ -152,8 +184,6 @@ private val Gold=Color(0xFFBC8624)
             }
             Row(Modifier.fillMaxWidth().height(39.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("무사즈가 함께하는 좋은 운전 습관",fontSize=11.sp,color=Muted)
-                Spacer(Modifier.weight(1f))
-                Text(if(vm.demo) "PROTOTYPE  ·  주행·참가자·보상은 시연 데이터" else "PLEOS LIVE  ·  차량 데이터 수신 확인용",fontSize=10.sp,color=Muted,letterSpacing=.3.sp)
             }
         }
     }
@@ -207,38 +237,31 @@ private val Gold=Color(0xFFBC8624)
     } }
 }
 
-@Composable private fun NavItem(label:String,icon:ImageVector,selected:Boolean,enabled:Boolean,onClick:()->Unit) {
-    Column(Modifier.padding(bottom=13.dp).width(72.dp).clip(RoundedCornerShape(16.dp)).background(if(selected) PaleMint else Color.Transparent).clickable(enabled=enabled,onClick=onClick).padding(vertical=13.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-        Icon(icon,label,Modifier.size(25.dp),tint=if(selected) Green else Muted.copy(alpha=if(enabled) 1f else .4f))
-        Text(label,Modifier.padding(top=7.dp),fontSize=11.sp,color=if(selected) Green else Muted,fontWeight=if(selected) FontWeight.Bold else FontWeight.Normal)
+@Composable private fun NavItem(
+    label: String,
+    @DrawableRes icon: Int,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected && enabled) Color(0xFFD6F7E9) else Color.Transparent)
+            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
+            .alpha(if (enabled) 1f else .45f)
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+            Image(painterResource(icon), contentDescription = null)
+        }
+        Text(label, fontSize = 16.sp, lineHeight = 20.sp, color = Ink, fontWeight = FontWeight.SemiBold)
     }
 }
 
-@Composable private fun Home(vm:ChallengeViewModel) {
-    Column(Modifier.fillMaxSize()) {
-        Text("오늘도, 무사히 함께.",fontSize=38.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1.8).sp)
-        Text("같은 목적지로 향하는 우리. 마지막 10km를 좋은 습관으로 채워요.",
-            fontSize=16.sp,color=Muted,modifier=Modifier.padding(top=5.dp,bottom=16.dp))
-        Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-            .background(Brush.horizontalGradient(listOf(Color(0xFFE9EFE5),Color(0xFFE7EFF2))))) {
-            ChallengeMap(vm,Modifier.weight(3f).fillMaxHeight())
-            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal=12.dp,vertical=20.dp),
-                horizontalAlignment=Alignment.CenterHorizontally) {
-                ExpressionMascot(DriveMood.ENCOURAGING,Modifier.weight(1f).fillMaxWidth())
-                Text(if(vm.awaitingMapRoute) "내비 경로 확인 중…" else "무사즈와 함께 출발해요",
-                    color=Ink,fontSize=15.sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center)
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top=22.dp,bottom=6.dp),verticalAlignment=Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CheckCircle,null,tint=Green,modifier=Modifier.size(18.dp));Text("  출발 전에 참가",fontSize=13.sp,fontWeight=FontWeight.Medium)
-            StepLine();Text("마지막 10km 자동 기록",fontSize=13.sp,color=Muted)
-            StepLine();Text("주차 후 결과와 보상",fontSize=13.sp,color=Muted)
-            Spacer(Modifier.weight(1f));Icon(Icons.Outlined.VerifiedUser,null,Modifier.size(18.dp),tint=Green)
-        }
-    }
-}
-
-@Composable private fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier) {
+@Composable internal fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier) {
     var query by remember { mutableStateOf("") }
     var zoom by remember { mutableFloatStateOf(1f) }
     var confirm by remember { mutableStateOf(false) }
@@ -254,7 +277,7 @@ private val Gold=Color(0xFFBC8624)
     val matches = query.isBlank() || searchMatch != null
     val now = rememberChallengeTime()
     val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
-    val participantCount = demoDestinations.first { it.name == "여의도한강공원" }.demoPeers
+    val participantCount = hangangChallenge.demoPeers
     Box(modifier.clipToBounds()) {
         if (showKakao) KakaoChallengeMap(participantCount, deadlineLabel, matches, searchMatch, { kakaoMap=it }, {
             kakaoMap=null
@@ -328,7 +351,7 @@ private val Gold=Color(0xFFBC8624)
                     color=Muted,fontSize=13.sp,modifier=Modifier.padding(top=6.dp,bottom=14.dp))
                 Primary("내비에서 검색",enabled=vm.parked && !vm.activeJourney && !vm.awaitingMapRoute) {
                     focus.clearFocus()
-                    vm.searchInNavigation(query)
+                    vm.searchDestination(query)
                 }
             }
         }
@@ -338,8 +361,15 @@ private val Gold=Color(0xFFBC8624)
             modifier=Modifier.align(Alignment.BottomStart).padding(20.dp))
     }
     LaunchedEffect(vm.parked) { if(!vm.parked) confirm=false }
-    if (confirm && vm.parked) Modal("이 목적지로 챌린지에 참가할까요?", "여의도 한강공원 · 참가 예시 4명", {confirm=false}) {
-        Text("길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
+    if (confirm && vm.parked) ChallengeEntryDialog(vm, hangangChallenge) { confirm = false }
+}
+
+@Composable internal fun ChallengeEntryDialog(vm: ChallengeViewModel, destination: Destination, onDismiss: () -> Unit) {
+    val isHangang = destination == hangangChallenge
+    val title = if (isHangang) "여의도 한강공원" else destination.name
+    Modal("이 목적지로 챌린지에 참가할까요?", "$title · 참가 예시 ${destination.demoPeers}명", onDismiss) {
+        Text(if (vm.demo && !isHangang) "예약 후 ‘시연 주행 재생’을 누르면 가상 주행이 시작돼요. 도착 후 결과를 볼 수 있어요."
+            else "길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
             color=Muted,modifier=Modifier.padding(bottom=18.dp))
         val beltRequired = !vm.demo && !vm.live.beltConditionMet
         if (beltRequired) {
@@ -349,7 +379,7 @@ private val Gold=Color(0xFFBC8624)
             Spacer(Modifier.height(12.dp))
         }
         if (beltRequired) {
-            OutlinedButton(onClick={confirm=false;vm.navigateToChallengeWithoutJoining()},modifier=Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick={onDismiss();vm.navigateToChallengeWithoutJoining()},modifier=Modifier.fillMaxWidth()) {
                 Text("길 안내만 열기")
             }
             Spacer(Modifier.height(8.dp))
@@ -357,15 +387,24 @@ private val Gold=Color(0xFFBC8624)
         if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
             Text("현재 내비 목적지도 한강 챌린지 반경에 포함돼요.", color=Green)
         }
-        RoundConsent(vm, if(vm.demo) "참가 예약 · 내비 시작" else "동의하고 내비 시작", !beltRequired,
+        val action = when {
+            !vm.demo -> "동의하고 내비 시작"
+            isHangang -> "참가 예약 · 내비 시작"
+            else -> "시연 참가 예약"
+        }
+        RoundConsent(vm, action, !beltRequired,
             if (!vm.demo && vm.hasLiveRoute && vm.destinationInHangangGroup && !beltRequired) {
-                { round -> confirm=false; vm.accept(round) }
+                { round -> onDismiss(); vm.accept(round) }
             } else null) {
-            confirm=false
-            vm.joinMapChallenge(it)
+            onDismiss()
+            if (isHangang) {
+                vm.joinMapChallenge(it)
+            } else if (vm.demo) {
+                vm.selectDestination(destination)
+                vm.accept(it)
+            }
         }
     }
-
 }
 
 @Composable private fun rememberChallengeTime(): Instant {
@@ -526,6 +565,7 @@ private val mileageRewards = listOf(
 
 @Composable private fun Wallet(vm:ChallengeViewModel) {
     var selected by remember { mutableStateOf<MileageReward?>(null) }
+    var showOilVoucher by remember { mutableStateOf(false) }
     val next = mileageRewards.firstOrNull { it.id !in vm.redeemedRewards }
     val available = mileageRewards.count { it.cost <= vm.balance && it.id !in vm.redeemedRewards }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -542,7 +582,13 @@ private val mileageRewards = listOf(
                 Text("시연에서만 사용하는 마일리지",color=Color(0xFFBDCCDA),fontSize=13.sp,modifier=Modifier.padding(top=8.dp))
             }
         }
-        Text("차량 관리 혜택",fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=19.dp,bottom=10.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("차량 관리 혜택", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = { showOilVoucher = true }) { Text("엔진오일 교환권 안내") }
+        }
         mileageRewards.forEachIndexed { index, reward ->
             val received = reward.id in vm.redeemedRewards
             val short = (reward.cost-vm.balance).coerceAtLeast(0)
@@ -563,6 +609,9 @@ private val mileageRewards = listOf(
             }
         }
     }
+    if (showOilVoucher && vm.parked) {
+        MonthlyOilVoucherInfo(onDismiss = { showOilVoucher = false })
+    }
     selected?.takeIf { vm.parked }?.let { reward ->
         val received=reward.id in vm.redeemedRewards
         val short=(reward.cost-vm.balance).coerceAtLeast(0)
@@ -570,26 +619,6 @@ private val mileageRewards = listOf(
             Text("필요 마일리지 ${reward.cost} M   /   내 잔액 ${vm.balance} M",fontSize=18.sp,modifier=Modifier.padding(bottom=20.dp))
             Primary(when { received -> "시연 교환 완료"; short>0 -> "${short} M 더 필요"; else -> "${reward.cost} M으로 시연 교환" },
                 enabled=!received && short==0) { vm.redeemDemoReward(reward) }
-        }
-    }
-}
-
-@Composable private fun Badges(vm:ChallengeViewModel) {
-    Row(Modifier.fillMaxSize(),horizontalArrangement=Arrangement.spacedBy(26.dp)) {
-        Column(Modifier.weight(.85f).fillMaxHeight().clip(RoundedCornerShape(26.dp)).background(Color(0xFFF3EEEA)).padding(26.dp)) {
-            Tag("내 배지 컬렉션",Color.White,Green)
-            Text("나의 무사한\n순간들.",fontSize=36.sp,lineHeight=46.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=14.dp))
-            ExpressionMascot(DriveMood.ENCOURAGING,Modifier.weight(1f).fillMaxWidth())
-            Text("조금씩 모이는 좋은 운전의 흔적",fontSize=13.sp,color=Muted)
-        }
-        Column(Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-            PageTitle("BADGE COLLECTION","작은 성취를 모아봐요","배지를 위한 추가 이동은 필요 없어요")
-            val earned=vm.ownedBadges.contains("first-drive")
-            BadgeRow("첫 무사 도착","첫 유효 주행 기록을 완성했어요",earned,Icons.Outlined.VerifiedUser,Gold)
-            BadgeRow("첫 발자국","${vm.ownedBadges.count { it.startsWith("visit:") }}곳에 남긴 첫 방문 기록",vm.ownedBadges.any { it.startsWith("visit:") },Icons.Outlined.LocationOn,Green)
-            BadgeRow("무사 TOP 3","85점 이상으로 그룹 상위 3위",vm.ownedBadges.contains("top-three"),Icons.Outlined.EmojiEvents,Color(0xFF8263A4))
-            BadgeRow("무사한 습관","준비 중 · 85점 이상 유효 기록 5회",false,Icons.Outlined.Eco,Green)
-            BadgeRow("꾸준한 무사즈","준비 중 · 서로 다른 7일의 유효 기록",false,Icons.Outlined.CalendarToday,Ink)
         }
     }
 }
@@ -708,19 +737,11 @@ private val mileageRewards = listOf(
 @Composable private fun Eyebrow(text:String) { Text(text,fontSize=11.sp,color=Green,fontWeight=FontWeight.Bold,letterSpacing=1.3.sp) }
 @Composable private fun PageTitle(overline:String,title:String,description:String) { Column(Modifier.padding(top=7.dp,bottom=24.dp)) { Text(title,fontSize=32.sp,fontWeight=FontWeight.Bold,letterSpacing=(-.8).sp,modifier=Modifier.padding(top=10.dp));Text(description,fontSize=14.sp,color=Muted,modifier=Modifier.padding(top=9.dp)) } }
 @Composable private fun Tag(text:String,bg:Color,fg:Color) { Text(text,Modifier.clip(RoundedCornerShape(8.dp)).background(bg).padding(horizontal=10.dp,vertical=6.dp),fontSize=11.sp,color=fg,fontWeight=FontWeight.Medium) }
-@Composable private fun StepLine() { Box(Modifier.padding(horizontal=19.dp).width(35.dp).height(1.dp).background(Line)) }
 @Composable private fun Tick(text:String) { Row(Modifier.padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Outlined.CheckCircle,null,tint=Green,modifier=Modifier.size(19.dp));Text(text,fontSize=15.sp,modifier=Modifier.padding(start=10.dp)) } }
 @Composable private fun InfoTile(label:String,value:String,modifier:Modifier) { Column(modifier.clip(RoundedCornerShape(16.dp)).background(Paper).padding(20.dp)) { Text(label,color=Muted,fontSize=12.sp);Text(value,fontSize=20.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=10.dp)) } }
 @Composable private fun SmallStat(label:String,value:String) { Column { Text(label,color=Muted,fontSize=11.sp);Text(value,fontSize=15.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=7.dp)) } }
 @Composable private fun MetricBar(label:String,value:Int,note:String) { Row { Text(label,fontSize=13.sp,fontWeight=FontWeight.Medium);Text("  $note",fontSize=11.sp,color=Muted);Spacer(Modifier.weight(1f));Text("$value",fontSize=13.sp,fontWeight=FontWeight.Bold,color=Green) };LinearProgressIndicator(progress={value/100f},modifier=Modifier.fillMaxWidth().padding(top=9.dp).height(6.dp).clip(CircleShape),color=Green,trackColor=PaleMint) }
 
-@Composable private fun BadgeRow(name:String,description:String,earned:Boolean,icon:ImageVector,color:Color) {
-    Row(Modifier.fillMaxWidth().padding(bottom=12.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(15.dp),verticalAlignment=Alignment.CenterVertically) {
-        Box(Modifier.size(49.dp).background(if(earned) color.copy(alpha=.12f) else Paper,RoundedCornerShape(14.dp)),contentAlignment=Alignment.Center) { Icon(icon,null,tint=if(earned) color else Muted.copy(alpha=.4f),modifier=Modifier.size(27.dp)) }
-        Column(Modifier.weight(1f).padding(start=15.dp)) { Text(name,fontSize=16.sp,fontWeight=FontWeight.Bold,color=if(earned) Ink else Muted);Text(description,fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=4.dp)) }
-        Icon(if(earned) Icons.Outlined.CheckCircle else Icons.Outlined.Lock,null,tint=if(earned) Green else Line,modifier=Modifier.size(20.dp))
-    }
-}
 @Composable private fun EmptyState(title:String,description:String,action:()->Unit) {
     Row(Modifier.fillMaxSize().padding(vertical=42.dp),verticalAlignment=Alignment.CenterVertically,
         horizontalArrangement=Arrangement.spacedBy(36.dp)) {

@@ -1,4 +1,4 @@
 # Android Studio normally writes sdk.dir when opening this project.
 sdk.dir=/absolute/path/to/Android/sdk
-# Fill in locally with the H1-score Kakao Developers native app key.
+# Fill in locally with the Kakao Developers native app key for this Android app.
 KAKAO_NATIVE_APP_KEY=
