@@ -10,10 +10,10 @@
 
 다시 테스트하려면 **마이페이지 → 처음 설정 다시 보기 → 다시 시작**을 누르세요. 안내 상태만 초기화하고 주행 기록·마일리지·배지·저장한 목적지·닉네임은 유지합니다.
 
-[최초 설정·튜토리얼 시연 영상 (약 100초)](docs/media/first-run/walkthrough.mp4) · [구현 범위·검증 기록](docs/verification/2026-11-10-drive-ui.md)
+[새 무사즈 포즈로 보는 최초 설정·튜토리얼 (1.7배속)](docs/media/pr-destination/tutorial-1.7x.mp4) · [구현 범위·검증 기록](docs/verification/2026-11-10-drive-ui.md)
 
 <p>
-  <img src="docs/media/first-run/welcome.png" alt="무사즈 최초 소개" width="48%">
+  <img src="docs/media/pr-destination/tutorial.png" alt="무사즈 최초 소개" width="48%">
   <img src="docs/media/first-run/spotlight.png" alt="검색창만 밝게 강조하는 튜토리얼" width="48%">
 </p>
 
