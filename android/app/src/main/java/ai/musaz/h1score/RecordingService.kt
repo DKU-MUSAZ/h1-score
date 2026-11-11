@@ -56,11 +56,18 @@ class RecordingService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("recording", "주행 기록", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        startForeground(10, Notification.Builder(this,"recording")
+        val notification = Notification.Builder(this,"recording")
             .setSmallIcon(R.drawable.ic_notification_drive)
             .setContentTitle(getString(R.string.notification_recording_title, getString(R.string.app_name)))
             .setContentText("내비게이션을 사용해도 기록은 계속됩니다. 주차 후 종료할 수 있어요.")
-            .setContentIntent(open).setOngoing(true).build())
+            .setContentIntent(open).setOngoing(true).build()
+        val locationGranted = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= 34) startForeground(10, notification,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                (if (locationGranted) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0))
+        else if (Build.VERSION.SDK_INT >= 29 && locationGranted) startForeground(10, notification,
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        else startForeground(10, notification)
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
     override fun onBind(intent: Intent?): IBinder? = null

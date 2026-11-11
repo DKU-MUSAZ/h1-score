@@ -22,15 +22,16 @@ class CelebrationRulesTest {
     @Test fun `low score cannot earn top three badge`() {
         assertFalse(BadgeRules.newAwards(true,"poi",84,1,emptySet()).any {it.id=="top-three"})
     }
-    @Test fun `demo profiles exercise three real score outcomes`() {
-        // 192 samples: 3.2 km personal replay; 624: full 10 km replay.
-        listOf(192, 624).forEach { sampleCount ->
-            val scores=DemoDrive.entries.map { profile ->
-                ScoreEngine.evaluate((0 until sampleCount).map { profile.sample(it) }).score!!
-            }
-            assertTrue(scores[0]>=90, "Celebration profile, $sampleCount samples: ${scores[0]}")
-            assertTrue(scores[1] in 75..89, "Encouraging profile, $sampleCount samples: ${scores[1]}")
-            assertTrue(scores[2]<75, "Teary profile, $sampleCount samples: ${scores[2]}")
+    @Test fun `demo profiles use the new scoring engine at ten Hz`() {
+        val scores = DemoDrive.entries.map { profile ->
+            ScoreEngine.evaluate((0 until 6240).map { profile.sample(it) })
         }
+        assertTrue(scores.all { it.scoringVersion == ScoreEngine.VERSION && it.longitudinalReady })
+        assertTrue(scores[0].score!! > scores[1].score!!)
+        assertTrue(scores[1].score!! > scores[2].score!!)
+        assertEquals(60, scores[2].score)
+        val short = ScoreEngine.evaluate((0 until 1920).map { DemoDrive.GOOD.sample(it) })
+        assertTrue(short.score!! < scores[0].score!!)
+        assertFalse(short.valid)
     }
 }

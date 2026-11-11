@@ -10,6 +10,7 @@ import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
 import java.util.UUID
+import kotlinx.coroutines.delay
 
 class CollectionRecordingTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
@@ -123,7 +125,7 @@ class CollectionRecordingTest {
     }
 
     @Test fun customShortcutEditorAddsSchoolAndRequiresRealPlace() {
-        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE)); switchSource() } }
+        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime())); switchSource() } }
         ui.setContent { MaterialTheme { DestinationShortcutEditor(vm,null) {} } }
         ui.onNodeWithText("새 바로가기 이름").performTextInput("학교")
         ui.onNodeWithText("바로가기 추가").performClick()
@@ -134,7 +136,7 @@ class CollectionRecordingTest {
         }
         screenshot.recycle()
         ui.onNodeWithText("저장").assertIsNotEnabled()
-        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE,destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime(),destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
         ui.waitUntil(3000) { ui.onAllNodesWithText("현재 내비 목적지 선택: 서울역").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performClick()
         ui.onNodeWithText("저장").performClick()
@@ -145,7 +147,7 @@ class CollectionRecordingTest {
         val app = isolatedApplication()
         val model = ui.runOnIdle {
             ChallengeViewModel(app).apply {
-                receiveVehicle(parkedVehicle().copy(speedAt = Long.MAX_VALUE))
+                receiveVehicle(parkedVehicle().copy(speedAt = SystemClock.elapsedRealtime()))
                 switchSource()
             }
         }
@@ -197,9 +199,19 @@ class CollectionRecordingTest {
         val app=isolatedApplication()
         app.prefs.edit().putInt("balance",100).commit()
         val model=ui.runOnIdle { ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE));switchSource();navigate(Screen.WALLET)
+            receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime()));switchSource();navigate(Screen.WALLET)
         } }
-        ui.setContent { H1App(model) }
+        ui.setContent {
+            // This long UI flow has no connected vehicle. Keep its simulated parked
+            // input fresh instead of relying on a sample that expires after 2.5 s.
+            LaunchedEffect(model) {
+                while (true) {
+                    model.receiveVehicle(parkedVehicle())
+                    delay(200)
+                }
+            }
+            H1App(model)
+        }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
         ui.onNodeWithText("와이퍼",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
@@ -249,8 +261,8 @@ class CollectionRecordingTest {
 
     @Test fun resultFeedbackPersistsAndScoreDialStaysSquare() {
         val app=isolatedApplication()
-        val report=ai.musaz.h1score.core.ScoreEngine.evaluate((0..700).map {
-            ai.musaz.h1score.core.Sample(it*1000L,when(it) {100->25.0;101->15.0;else->20.0},80)
+        val report=ai.musaz.h1score.core.ScoreEngine.evaluate((0..7000).map {
+            ai.musaz.h1score.core.Sample(it*100L,when(it) {in 1000..1010->25.0;in 1011..1020->15.0;else->20.0},80)
         })
         val store=CompletedDriveStore(app.prefs)
         store.save(CompletedDrive(
@@ -258,7 +270,7 @@ class CollectionRecordingTest {
             report,"피드백 테스트",true,listOf(ai.musaz.h1score.core.RankedEntry("나",report.score!!,1,0)),0,false))
         assertEquals(report,store.read()!!.report)
         val model=ui.runOnIdle {ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle().copy(speedAt=Long.MAX_VALUE))
+            receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime()))
             openCompletedResult()
         }}
         ui.setContent {H1App(model)}
@@ -296,7 +308,7 @@ class CollectionRecordingTest {
     }
 
     private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
-        gearPark = true, uxRestricted = false, belt = true)
+        gearPark = true, uxRestricted = false, belt = true, beltAt = SystemClock.elapsedRealtime())
 
     private fun isolatedApplication(): RecordingTestApplication =
         RecordingTestApplication(ui.activity.applicationContext)

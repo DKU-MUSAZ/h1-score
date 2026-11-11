@@ -1,5 +1,7 @@
 package ai.musaz.h1score
 
+import android.os.SystemClock
+
 import ai.musaz.h1score.core.ChallengeRound
 import ai.musaz.h1score.core.ChallengeSession
 import ai.musaz.h1score.core.DrivingEvent
@@ -13,13 +15,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,6 +35,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
 import java.util.UUID
+import kotlin.math.min
 
 class DriveHistoryPersistenceTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
@@ -211,6 +218,123 @@ class DriveHistoryPersistenceTest {
         assertEquals(originalPreferences, app.prefs.all)
     }
 
+    @Test fun savedFeedbackDoesNotChangeTheOrdinaryResultOrStoredDrive() {
+        val app = application()
+        val saved = drive("feedback", 1_000L, false, 91)
+        CompletedDriveStore(app.prefs).save(saved)
+        app.prefs.edit().putInt("balance", 140).commit()
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); openCompletedResult() } }
+        val originalPreferences = app.prefs.all.toMap()
+        val originalSession = vm.session
+        val originalReport = vm.report
+        val originalBalance = vm.balance
+        ui.setContent { H1App(vm) }
+
+        ui.onNodeWithText("이번 주행 피드백").assertIsDisplayed()
+        ui.onNodeWithText("70% 반영", substring = true).performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("30% 반영", substring = true).performScrollTo().assertIsDisplayed()
+        listOf("유효 주행", "데이터 수신", "급제동").forEach {
+            ui.onNodeWithText(it).performScrollTo().assertIsDisplayed()
+        }
+        ui.onNodeWithText("운전 습관 요약").assertDoesNotExist()
+        ui.onNodeWithText("이어갈 습관").assertDoesNotExist()
+        ui.onNodeWithText("개선할 점").assertDoesNotExist()
+
+        ui.onNodeWithText("내 기록").performClick()
+        ui.onNodeWithText(saved.name).performScrollTo().performClick()
+        ui.onNodeWithText("운전 습관 요약").assertIsDisplayed()
+        ui.onNodeWithText("이번 주행 피드백").assertDoesNotExist()
+        ui.onNodeWithText("91").assertIsDisplayed()
+        ui.onNodeWithText("과속").assertIsDisplayed()
+        ui.onNodeWithText("급가속").assertIsDisplayed()
+        ui.onNodeWithText("급감속").assertIsDisplayed()
+        assertSavedOverviewVisibleWithoutScrolling()
+        listOf("유효 주행", "데이터 수신", "급제동", "잘한 점").forEach {
+            ui.onNodeWithText(it).assertDoesNotExist()
+        }
+        ui.runOnIdle {
+            assertEquals(saved, vm.selectedHistoryRecord)
+            assertEquals(originalSession, vm.session)
+            assertEquals(originalReport, vm.report)
+            assertEquals(originalBalance, vm.balance)
+            vm.openCompletedResult()
+            assertNull(vm.selectedHistoryRecord)
+        }
+
+        ui.onNodeWithText("이번 주행 피드백").assertIsDisplayed()
+        ui.onNodeWithText("70% 반영", substring = true).performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("30% 반영", substring = true).performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("운전 습관 요약").assertDoesNotExist()
+        ui.onNodeWithText("이어갈 습관").assertDoesNotExist()
+        ui.onNodeWithText("개선할 점").assertDoesNotExist()
+        listOf("유효 주행", "데이터 수신", "급제동").forEach {
+            ui.onNodeWithText(it).performScrollTo().assertIsDisplayed()
+        }
+        assertEquals(saved, CompletedDriveStore(app.prefs).read())
+        assertEquals(originalPreferences, app.prefs.all)
+    }
+
+    @Test fun savedOverviewOpensAllDetailsAndReturnsWithoutChangingTheSelectedHistory() {
+        val app = application()
+        val base = drive("details", Instant.parse("2026-11-11T00:10:00Z").toEpochMilli())
+        val events = List(10) { index ->
+            DrivingEvent(DrivingEventType.entries[index % 3], index * 60_000L,
+                (index + 1) * 1_000.0, 70.0, 83.0, 80)
+        }
+        val saved = base.copy(
+            report = base.report.copy(accelerationEvents = 3, overLimitDistanceM = 1_234.0, events = events),
+            ranking = listOf(RankedEntry("나", 91, 1, 80), RankedEntry("함께 달린 무사즈", 91, 1, 80)),
+            earned = 0,
+        )
+        CompletedDriveStore(app.prefs).save(saved)
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val originalPreferences = app.prefs.all.toMap()
+        ui.setContent { MinimumHistoryFrame(vm) }
+
+        ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
+        ui.onNodeWithText("오래된순").performClick()
+        ui.onNodeWithText(saved.name).performClick()
+        assertSavedOverviewVisibleWithoutScrolling()
+        ui.onNodeWithText("+0 M").assertIsDisplayed()
+        ui.onNodeWithText("+80 M").assertDoesNotExist()
+        ui.onNodeWithText("공동 1위").assertIsDisplayed()
+        ui.onNodeWithText("9분 0초", substring = true).assertDoesNotExist()
+
+        ui.onNodeWithText("피드백 전체보기").performClick()
+        dialogText("주행 피드백 전체보기").assertIsDisplayed()
+        historyFeedback(saved.report).goodPoints.forEach { dialogText(it).performScrollTo().assertIsDisplayed() }
+        historyFeedback(saved.report).improvements.forEach { dialogText(it).performScrollTo().assertIsDisplayed() }
+        dialogText("전체 횟수는 확인할 수 없어요", substring = true).performScrollTo().assertIsDisplayed()
+        ui.onNodeWithContentDescription("닫기").performClick()
+        assertSavedOverviewVisibleWithoutScrolling()
+
+        ui.onNodeWithText("구간 전체보기").performClick()
+        dialogText("저장된 주행 구간").assertIsDisplayed()
+        dialogText("저장된 구간 10건").assertIsDisplayed()
+        dialogText("9분 0초", substring = true).performScrollTo().assertIsDisplayed()
+        ui.onNodeWithContentDescription("닫기").performClick()
+        assertSavedOverviewVisibleWithoutScrolling()
+
+        ui.onNodeWithText("순위 전체보기").performClick()
+        dialogText("함께 도착한 무사즈").assertIsDisplayed()
+        dialogText("함께 달린 무사즈").performScrollTo().assertIsDisplayed()
+        dialogText("+0 M").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithContentDescription("닫기").performClick()
+        assertSavedOverviewVisibleWithoutScrolling()
+        ui.runOnIdle {
+            assertEquals(saved, vm.selectedHistoryRecord)
+            assertNull(vm.session)
+            assertNull(vm.report)
+        }
+
+        ui.onNodeWithContentDescription("기록 목록으로").performClick()
+        ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
+        ui.onNodeWithText("오래된순").assertIsSelected()
+        ui.onNodeWithText(saved.name).assertIsDisplayed()
+        assertEquals(saved, CompletedDriveStore(app.prefs).read())
+        assertEquals(originalPreferences, app.prefs.all)
+    }
+
     @Test fun openingHistoryDoesNotReplaceAnActiveJourneyOrCreditRewardsAgain() {
         val app = application()
         val saved = drive("saved", 1_000L, false)
@@ -273,6 +397,29 @@ class DriveHistoryPersistenceTest {
         assertTrue("${above.name} should appear before ${below.name}", first.top < second.top)
     }
 
+    private fun assertSavedOverviewVisibleWithoutScrolling() {
+        listOf("운전 습관 요약", "이어갈 습관", "개선할 점", "주요 주행 구간", "함께 도착한 무사즈",
+            "피드백 전체보기", "구간 전체보기", "순위 전체보기").forEach {
+            ui.onNodeWithText(it).assertIsDisplayed()
+        }
+        ui.onNodeWithContentDescription("기록 목록으로").assertIsDisplayed()
+        ui.onAllNodes(hasScrollAction()).assertCountEquals(0)
+    }
+
+    private fun dialogText(text: String, substring: Boolean = false) =
+        ui.onNode(hasText(text, substring = substring) and hasAnyAncestor(isDialog()))
+
+    /** Exercise the 555dp content area, even when the emulator offers a taller window. */
+    @Composable private fun MinimumHistoryFrame(vm: ChallengeViewModel) {
+        BoxWithConstraints {
+            val density = LocalDensity.current
+            val scale = min(maxWidth.value / 1180f, maxHeight.value / 680f)
+            CompositionLocalProvider(LocalDensity provides Density(density.density * scale, density.fontScale)) {
+                Box(Modifier.requiredSize(1180.dp, 680.dp)) { H1App(vm) }
+            }
+        }
+    }
+
     /** Exact legacy shape: no history fields and no PR4 event array. */
     private fun legacyJson(value: CompletedDrive) = JSONObject().apply {
         val session = value.session
@@ -290,8 +437,8 @@ class DriveHistoryPersistenceTest {
         } })
     }
 
-    private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = Long.MAX_VALUE,
-        gearPark = true, uxRestricted = false, belt = true)
+    private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
+        gearPark = true, uxRestricted = false, belt = true, beltAt = SystemClock.elapsedRealtime())
 
     private fun application() = HistoryTestApplication(ui.activity.applicationContext).also(applications::add)
 

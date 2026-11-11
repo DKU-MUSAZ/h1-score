@@ -9,7 +9,7 @@ internal data class CompletedDrive(
     val session: ChallengeSession, val report: ScoreReport, val name: String,
     val demo: Boolean, val ranking: List<RankedEntry>, val earned: Int, val missedDeadline: Boolean,
     val completedAtEpochMs: Long? = null,
-    val scoringVersion: String = "speed70-accel30-v1",
+    val scoringVersion: String = report.scoringVersion,
 )
 
 internal class CompletedDriveStore(private val prefs: SharedPreferences) {
@@ -80,6 +80,30 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 put("type", event.type.name); put("elapsedMs", event.elapsedMs); put("distanceM", event.distanceM)
                 put("fromKph", event.fromKph); put("toKph", event.toKph); put("limitKph", event.limitKph)
             }) } })
+            if (value.scoringVersion != LEGACY_SCORING_VERSION) {
+                put("speedPoints", r.speedPoints); put("accelerationPoints", r.accelerationPoints)
+                put("brakingEvents", r.brakingEvents)
+                put("longitudinalCoverage", r.longitudinalCoverage)
+                put("longitudinalReady", r.longitudinalReady)
+                put("longitudinalSampleRateHz", r.longitudinalSampleRateHz)
+                put("kilometers", JSONArray().apply { r.kilometers.forEach { km -> put(JSONObject().apply {
+                    put("kilometer", km.kilometer); put("distanceM", km.distanceM)
+                    put("validDistanceM", km.validDistanceM); put("speedPoints", km.speedPoints)
+                    put("accelerationPoints", km.accelerationPoints)
+                }) } })
+                put("turns", JSONArray().apply { r.turns.forEach { turn -> put(JSONObject().apply {
+                    put("startedAtMs", turn.startedAtMs); put("endedAtMs", turn.endedAtMs)
+                    put("direction", turn.direction.name); put("verdict", turn.verdict.name)
+                }) } })
+                put("longitudinalEvents", JSONArray().apply { r.longitudinalEvents.forEach { event -> put(JSONObject().apply {
+                    put("kind", event.kind.name); put("startedAtNanos", event.startedAtNanos)
+                    put("endedAtNanos", event.endedAtNanos); put("peakAccelerationMps2", event.peakAccelerationMps2)
+                    put("brakePressed", event.brakePressed)
+                    put("qualifyingIntervals", JSONArray().apply { event.qualifyingIntervals.forEach { span -> put(JSONObject().apply {
+                        put("startedAtNanos", span.startedAtNanos); put("endedAtNanos", span.endedAtNanos)
+                    }) } })
+                }) } })
+            }
             put("ranking", JSONArray().apply { value.ranking.forEach { put(JSONObject().apply {
                 put("id", it.id); put("score", it.score); put("rank", it.rank); put("miles", it.miles)
             }) } })
@@ -89,6 +113,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
     private fun decode(j: JSONObject): CompletedDrive? = runCatching {
         val rows = j.getJSONArray("ranking")
         val events = j.optJSONArray("events")
+        val version = j.optString("scoringVersion", LEGACY_SCORING_VERSION)
         CompletedDrive(
             session = ChallengeSession(
                 j.getString("id"), j.getString("destinationId"), j.getDouble("initialDistanceM"), Phase.FINISHED,
@@ -108,6 +133,29 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                         event.getDouble("toKph"), event.getInt("limitKph"),
                     )
                 },
+                speedPoints = j.optDouble("speedPoints", 0.0),
+                accelerationPoints = j.optDouble("accelerationPoints", 0.0),
+                kilometers = j.optJSONArray("kilometers").objects().map { km ->
+                    KmBonus(km.getInt("kilometer"), km.getDouble("distanceM"), km.getDouble("validDistanceM"),
+                        km.getDouble("speedPoints"), km.getDouble("accelerationPoints"))
+                },
+                brakingEvents = j.optInt("brakingEvents", 0),
+                turns = j.optJSONArray("turns").objects().map { turn ->
+                    TurnEvent(turn.getLong("startedAtMs"), turn.getLong("endedAtMs"),
+                        TurnDirection.valueOf(turn.getString("direction")), TurnVerdict.valueOf(turn.getString("verdict")))
+                },
+                longitudinalEvents = j.optJSONArray("longitudinalEvents").objects().map { event ->
+                    LongitudinalEvent(LongitudinalKind.valueOf(event.getString("kind")),
+                        event.getLong("startedAtNanos"), event.getLong("endedAtNanos"), event.getDouble("peakAccelerationMps2"),
+                        if (event.has("brakePressed") && !event.isNull("brakePressed")) event.getBoolean("brakePressed") else null,
+                        event.optJSONArray("qualifyingIntervals").objects().map { span ->
+                            LongitudinalSpan(span.getLong("startedAtNanos"), span.getLong("endedAtNanos"))
+                        })
+                },
+                longitudinalCoverage = j.optDouble("longitudinalCoverage", 0.0),
+                longitudinalReady = j.optBoolean("longitudinalReady", false),
+                longitudinalSampleRateHz = j.optDouble("longitudinalSampleRateHz", 0.0),
+                scoringVersion = version,
             ),
             name = j.getString("name"),
             demo = j.getBoolean("demo"),
@@ -117,9 +165,12 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             earned = j.getInt("earned"),
             missedDeadline = j.getBoolean("missedDeadline"),
             completedAtEpochMs = if (j.has("completedAtEpochMs") && !j.isNull("completedAtEpochMs")) j.getLong("completedAtEpochMs") else null,
-            scoringVersion = j.optString("scoringVersion", "speed70-accel30-v1"),
+            scoringVersion = version,
         )
     }.getOrNull()
+
+    private fun JSONArray?.objects(): List<JSONObject> =
+        if (this == null) emptyList() else List(length()) { getJSONObject(it) }
 
     private companion object {
         const val HISTORY_KEY = "completed-drives-v1"
