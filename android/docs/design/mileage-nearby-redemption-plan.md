@@ -2,7 +2,7 @@
 
 **상태: 설계안·후속 작업. 현재 앱에는 연결돼 있지 않습니다.**
 
-관련: [후속 이슈 #5](https://github.com/DKU-MUSAZ/h1-score/issues/5), [PR #4](https://github.com/DKU-MUSAZ/h1-score/pull/4), [이번 PR 구현 내용](pr-4-implementation-notes.md).
+관련: [PR #4](https://github.com/DKU-MUSAZ/h1-score/pull/4), [이번 PR 구현 내용](pr-4-implementation-notes.md).
 
 ## 목적
 

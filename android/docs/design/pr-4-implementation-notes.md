@@ -2,14 +2,6 @@
 
 [PR #4](https://github.com/DKU-MUSAZ/h1-score/pull/4)의 기능 변경 커밋 `92f641a`를 기준으로 정리했습니다. 화면 캡처는 [시연 자료와 재현 방법](../pr/ui-mileage-driving-feedback/README.md)에서 확인할 수 있습니다.
 
-## 관련 후속 이슈
-
-- [#5 현재 위치 기반 마일리지 사용처 탐색](https://github.com/DKU-MUSAZ/h1-score/issues/5)
-- [#6 안전점수 감점·가점 기준에 맞춘 주행 피드백 보완](https://github.com/DKU-MUSAZ/h1-score/issues/6)
-- [#7 마이페이지 차량 상태 화면 재정리](https://github.com/DKU-MUSAZ/h1-score/issues/7)
-
-후속 이슈는 PR #4 머지만으로 완료 처리하지 않습니다.
-
 ## 구현 범위
 
 | 항목 | 이번 PR에서 바뀐 내용 | 상태 |
