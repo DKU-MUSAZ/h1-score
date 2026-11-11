@@ -40,6 +40,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import ai.musaz.h1score.core.*
 import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
 import kotlinx.coroutines.delay
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -120,6 +122,8 @@ private val Gold=H1Style.Gold
     var simulator by remember { mutableStateOf(false) }
     var badgeReveal by remember { mutableStateOf(false) }
     var historyDateOrder by rememberSaveable { mutableStateOf(HistoryDateOrder.NEWEST_FIRST) }
+    var historySelectedDate by rememberSaveable { mutableStateOf<String?>(null) }
+    var historyMonth by rememberSaveable { mutableStateOf(initialHistoryMonth(vm.completedDrives).toString()) }
     LaunchedEffect(vm.parked) { if(!vm.parked) { destinations=false; simulator=false; badgeReveal=false } }
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
@@ -195,7 +199,9 @@ private val Gold=H1Style.Gold
                             onCancelSpot = vm::cancelSpotVisit,
                             onChallenge = { vm.navigate(Screen.HOME) }
                         )
-                        Screen.HISTORY -> History(vm,historyDateOrder) { historyDateOrder=it }
+                        Screen.HISTORY -> History(vm,historyDateOrder,{ historyDateOrder=it },
+                            historySelectedDate?.let(LocalDate::parse),{ historySelectedDate=it?.toString() },
+                            YearMonth.parse(historyMonth),{ historyMonth=it.toString() })
                         Screen.CONNECTION -> ConnectionScreen(vm)
                         Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
                     }
@@ -607,13 +613,20 @@ private val Gold=H1Style.Gold
     }
 }
 
-@Composable private fun History(vm:ChallengeViewModel,dateOrder:HistoryDateOrder,onDateOrder:(HistoryDateOrder)->Unit) {
+@Composable private fun History(
+    vm:ChallengeViewModel,dateOrder:HistoryDateOrder,onDateOrder:(HistoryDateOrder)->Unit,
+    selectedDate:LocalDate?,onDateSelected:(LocalDate?)->Unit,
+    month:YearMonth,onMonthChange:(YearMonth)->Unit,
+) {
     if(vm.completedDrives.isEmpty()) { EmptyState("첫 드라이브를 기다리고 있어요","참가한 이동의 주행습관과 결과를 이곳에 모아드릴게요.") { vm.navigate(Screen.HOME) };return }
-    val records=remember(vm.completedDrives,dateOrder) { historyByDate(vm.completedDrives,dateOrder) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    val records=remember(vm.completedDrives,dateOrder,selectedDate) { historyByDate(historyForDay(vm.completedDrives,selectedDate),dateOrder) }
+    val recordDates=remember(vm.completedDrives) { vm.completedDrives.mapNotNull { historyDate(it.completedAtEpochMs) }.toSet() }
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(bottom=20.dp),verticalAlignment=Alignment.CenterVertically) {
             Text("저장된 주행 기록",color=Muted,fontSize=14.sp)
             Spacer(Modifier.weight(1f))
+            FilterChip(selected=selectedDate==null,onClick={onDateSelected(null)},label={Text("전체 기록")})
+            Spacer(Modifier.width(16.dp))
             Row(Modifier.selectableGroup(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 listOf(HistoryDateOrder.NEWEST_FIRST to "최신순",HistoryDateOrder.OLDEST_FIRST to "오래된순").forEach { (order,label) ->
                     FilterChip(selected=dateOrder==order,onClick={onDateOrder(order)},label={Text(label)},
@@ -621,17 +634,35 @@ private val Gold=H1Style.Gold
                 }
             }
         }
-        records.forEach { record ->
-            key(record.session.id) {
-                Surface(onClick={vm.openHistoryRecord(record.session.id)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth().padding(bottom=20.dp)) {
-                    Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
-                        Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
-                        Column(Modifier.weight(1f).padding(start=20.dp)) {
-                            Text(record.name,fontSize=24.sp,fontWeight=FontWeight.Bold)
-                            Text(historyDateLabel(record.completedAtEpochMs),color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=8.dp))
-                            Text("유효 거리 ${"%.1f".format(record.report.validDistanceM/1000)} km  ·  ${if(record.demo) "시연 기록" else "SDK 기록"}",color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=4.dp))
+        Row(Modifier.weight(1f).fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(20.dp)) {
+            HistoryCalendar(month,selectedDate,recordDates,onMonthChange,{onDateSelected(it)},
+                Modifier.width(368.dp).verticalScroll(rememberScrollState()))
+            key(selectedDate,dateOrder) {
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                    Text(selectedDate?.let { "${it.year}.${"%02d".format(it.monthValue)}.${"%02d".format(it.dayOfMonth)} · ${records.size}건" }
+                        ?: "전체 ${records.size}건",color=Muted,fontSize=14.sp,modifier=Modifier.padding(bottom=16.dp))
+                    if(records.isEmpty()) {
+                        Surface(color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(28.dp)) {
+                                Text("이날은 주행 기록이 없어요",fontSize=20.sp,fontWeight=FontWeight.Bold,color=Ink)
+                                Text("다른 날짜를 선택하거나 전체 기록을 확인해 주세요.",color=Muted,fontSize=14.sp,lineHeight=22.sp,modifier=Modifier.padding(top=8.dp))
+                            }
                         }
-                        Text("${record.report.score ?: "—"}",fontSize=40.sp,color=Green);Text(" 점",color=Muted);Icon(Icons.Outlined.ChevronRight,null,Modifier.padding(start=28.dp))
+                    }
+                    records.forEach { record ->
+                        key(record.session.id) {
+                            Surface(onClick={vm.openHistoryRecord(record.session.id)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth().padding(bottom=20.dp)) {
+                                Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
+                                    Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
+                                    Column(Modifier.weight(1f).padding(start=20.dp)) {
+                                        Text(record.name,fontSize=24.sp,fontWeight=FontWeight.Bold)
+                                        Text(historyDateLabel(record.completedAtEpochMs),color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=8.dp))
+                                        Text("유효 거리 ${"%.1f".format(record.report.validDistanceM/1000)} km  ·  ${if(record.demo) "시연 기록" else "SDK 기록"}",color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=4.dp))
+                                    }
+                                    Text("${record.report.score ?: "—"}",fontSize=40.sp,color=Green);Text(" 점",color=Muted);Icon(Icons.Outlined.ChevronRight,null,Modifier.padding(start=28.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }

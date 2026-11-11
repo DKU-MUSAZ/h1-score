@@ -16,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -155,6 +156,57 @@ class DriveHistoryPersistenceTest {
         assertHistoryAbove(first, second)
         ui.onNodeWithText("최신순").performClick().assertIsSelected()
         assertHistoryAbove(second, first)
+        ui.runOnIdle { assertEquals(originalRecords, vm.completedDrives) }
+        assertEquals(originalPreferences, app.prefs.all)
+    }
+
+    @Test fun calendarFiltersDaysAndPreservesSortDetailSelectionAndSavedData() {
+        val app = application()
+        val first = drive("earlier", Instant.parse("2026-11-10T23:35:00Z").toEpochMilli(), false, 91)
+        val second = drive("later", Instant.parse("2026-11-11T00:10:00Z").toEpochMilli(), true, 78)
+        val otherDay = drive("other-day", Instant.parse("2026-11-10T14:59:59Z").toEpochMilli(), true, 65)
+        val priorMonth = drive("prior-month", Instant.parse("2026-10-31T00:10:00Z").toEpochMilli())
+        val unknown = drive("legacy", null)
+        val saved = listOf(first, second, otherDay, priorMonth, unknown)
+        CompletedDriveStore(app.prefs).apply { saved.forEach(::save) }
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val originalPreferences = app.prefs.all.toMap()
+        val originalRecords = vm.completedDrives.toList()
+        ui.setContent { H1App(vm) }
+
+        ui.onNodeWithText("2026년 11월").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 11일").performClick().assertIsSelected()
+        assertHistoryAbove(second, first)
+        ui.onNodeWithText(otherDay.name).assertDoesNotExist()
+        ui.onNodeWithText(priorMonth.name).assertDoesNotExist()
+        ui.onNodeWithText(unknown.name).assertDoesNotExist()
+        ui.onNodeWithText("오래된순").performClick().assertIsSelected()
+        assertHistoryAbove(first, second)
+        ui.onNodeWithText(first.name).performClick()
+        ui.onNodeWithText(first.name).assertIsDisplayed()
+        ui.onNodeWithText("91").assertIsDisplayed()
+        ui.runOnIdle { assertEquals(first, vm.selectedHistoryRecord) }
+
+        ui.onNodeWithText("내 기록").performClick()
+        ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
+        ui.onNodeWithText("오래된순").assertIsSelected()
+        assertHistoryAbove(first, second)
+        ui.onNodeWithContentDescription("2026년 11월 12일").performClick().assertIsSelected()
+        ui.onNodeWithText("이날은 주행 기록이 없어요").assertIsDisplayed()
+        saved.forEach { ui.onNodeWithText(it.name).assertDoesNotExist() }
+
+        ui.onNodeWithContentDescription("이전 달").performClick()
+        ui.onNodeWithText("2026년 10월").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 10월 31일").performClick().assertIsSelected()
+        ui.onNodeWithText(priorMonth.name).assertIsDisplayed()
+        ui.onNodeWithText("이날은 주행 기록이 없어요").assertDoesNotExist()
+        ui.onNodeWithText(first.name).assertDoesNotExist()
+        ui.onNodeWithContentDescription("다음 달").performClick()
+        ui.onNodeWithText("2026년 11월").assertIsDisplayed()
+
+        ui.onNodeWithText("전체 기록").performClick()
+        saved.forEach { ui.onNodeWithText(it.name).performScrollTo().assertIsDisplayed() }
+        ui.onNodeWithText("주행 날짜 미상").assertIsDisplayed()
         ui.runOnIdle { assertEquals(originalRecords, vm.completedDrives) }
         assertEquals(originalPreferences, app.prefs.all)
     }
