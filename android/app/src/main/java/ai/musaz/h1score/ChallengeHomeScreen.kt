@@ -2,6 +2,7 @@ package ai.musaz.h1score
 
 import ai.musaz.h1score.core.ChallengeRound
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
@@ -133,16 +135,16 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it; searching = true },
-                    modifier = Modifier.weight(1f).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
+                    modifier = Modifier.weight(1f).heightIn(min = 68.dp).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
                     enabled = canChoose,
                     singleLine = true,
-                    shape = RoundedCornerShape(30.dp),
-                    placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 19.sp) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    shape = RoundedCornerShape(34.dp),
+                    placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 21.sp) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(26.dp)) },
                     trailingIcon = if (query.isNotEmpty()) {
                         { IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "검색어 지우기") } }
                     } else null,
-                    textStyle = LocalTextStyle.current.copy(fontSize = 19.sp),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searchDestination(query) }),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -169,8 +171,8 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 val score = vm.collectionProgress.weeklyScoreAverage(LocalDate.now(ChallengeRound.seoul))
                 Column(
                     Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                        .background(H1Style.heroBackground).padding(top = 18.dp, bottom = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .background(H1Style.heroBackground).padding(top = 18.dp, bottom = 28.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     ChallengeHomeHero(vm.recordedDistanceMeters, score, Modifier.weight(1f))
                     Text(
@@ -250,45 +252,55 @@ private fun DestinationShortcutButton(
 private fun ChallengeHomeHero(distanceMeters: Long, score: Int?, modifier: Modifier) {
     val distance = String.format(Locale.KOREA, "%,.1f km", distanceMeters / 1_000.0)
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val imageHeight = (maxHeight - 60.dp).coerceIn(0.dp, 380.dp)
-        val statOffset = imageHeight * .635f
-        val statTop = -6.dp
+        val imageHeight = (maxHeight - 20.dp).coerceIn(0.dp, 380.dp)
+        val statDiameter = (imageHeight * .62f).coerceIn(144.dp, HomeStatDiameter)
+        val maxStatOffset = ((maxWidth - statDiameter) / 2 - 12.dp).coerceAtLeast(0.dp)
+        // The mascot PNG has transparent side margins: match the visible figure,
+        // with the two circles above its hands, as in the reference layout.
+        val statOffset = (statDiameter / 2 + imageHeight * .30f).coerceAtMost(maxStatOffset)
+        val statTop = (maxHeight - imageHeight - 90.dp).coerceAtLeast(18.dp)
         ChallengeHomeStat(
             "무사즈와", distance, "달렸어요",
-            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop)
+            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop), statDiameter
         )
         ChallengeHomeStat(
             "이번 주 안전점수", score?.let { "${it}점" } ?: "—",
             if (score == null) "아직 기록이 없어요" else "일별 최고점 평균",
-            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop)
+            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop), statDiameter
         )
         Image(
             painterResource(R.drawable.musaz_challenge_home),
             contentDescription = null,
-            modifier = Modifier.align(Alignment.Center).offset(y = 30.dp).size(imageHeight * 1.5f, imageHeight),
+            modifier = Modifier.align(Alignment.BottomCenter).offset(y = 8.dp).size(imageHeight * 1.5f, imageHeight),
             contentScale = ContentScale.Fit
         )
     }
 }
 
 @Composable
-private fun ChallengeHomeStat(title: String, value: String, caption: String, modifier: Modifier) {
-    Surface(modifier.size(HomeStatDiameter), shape = CircleShape, color = Color.White.copy(alpha = .65f)) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 30.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
-        ) {
-            Text(title, color = H1Style.Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center)
-            BasicText(
-                value,
-                style = LocalTextStyle.current.copy(color = H1Style.Ink, fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center),
-                maxLines = 1,
-                autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = 44.sp)
-            )
-            Text(caption, color = H1Style.Muted, fontSize = 17.sp, textAlign = TextAlign.Center)
+private fun ChallengeHomeStat(title: String, value: String, caption: String, modifier: Modifier, diameter: Dp) {
+    val scale = diameter / HomeStatDiameter
+    Box(modifier.size(diameter)) {
+        Box(Modifier.matchParentSize().offset(x = 6.dp * scale, y = 8.dp * scale)
+            .background(H1Style.Ink.copy(alpha = .12f), CircleShape))
+        Surface(Modifier.fillMaxSize(), shape = CircleShape, color = H1Style.Ink,
+            shadowElevation = 8.dp * scale, border = BorderStroke(1.dp, Color.White.copy(alpha = .18f))) {
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 30.dp * scale, vertical = 12.dp * scale),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp * scale, Alignment.CenterVertically)
+            ) {
+                Text(title, color = Color.White, fontSize = 21.sp * scale, fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center)
+                BasicText(
+                    value,
+                    style = LocalTextStyle.current.copy(color = Color.White, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center),
+                    maxLines = 1,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 16.sp * scale, maxFontSize = 44.sp * scale)
+                )
+                Text(caption, color = Color(0xFFDCE3EC), fontSize = 17.sp * scale, textAlign = TextAlign.Center)
+            }
         }
     }
 }

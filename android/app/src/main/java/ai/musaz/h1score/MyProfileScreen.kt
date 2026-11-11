@@ -1,6 +1,5 @@
 package ai.musaz.h1score
 
-import android.car.VehicleGear
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.foundation.*
@@ -25,13 +24,14 @@ import kotlinx.coroutines.delay
 private val ProfileInk=Color(0xFF152D4C)
 private val ProfileMuted=Color(0xFF73818F)
 private val ProfilePaper=Color(0xFFF5F6F8)
-private val ProfileGreen=Color(0xFF176B54)
+private val ProfileGreen=H1Style.Ink
 
-internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val oil: String?=null,val steering: Float?=null)
+internal data class ProfileEnergy(
+    val battery: Int?=null, val fuel: Int?=null, val oil: String?=null, val steering: Float?=null,
+    val washerFluidLow: Boolean?=null, val evEfficiency: Float?=null, val fuelEconomy: Float?=null,
+)
 
 @Composable internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
-    var replaySetup by remember {mutableStateOf(false)}
-    LaunchedEffect(enabled) {if(!enabled) replaySetup=false}
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
     var energy by remember { mutableStateOf(ProfileEnergy()) }
@@ -49,19 +49,8 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
     val live=vm.live
     val showVehicle=!vm.demo
     fun <T> vehicle(value:T?): T? = value.takeIf { showVehicle }
-    val gear=when(vehicle(live.gearCode)) {
-        VehicleGear.GEAR_PARK -> "P · 주차"
-        VehicleGear.GEAR_DRIVE -> "D · 전진"
-        VehicleGear.GEAR_REVERSE -> "R · 후진"
-        VehicleGear.GEAR_NEUTRAL -> "N · 중립"
-        else -> if(vehicle(live.gearPark)==true) "P · 주차" else null
-    }
     val rows=listOf(
-        "현재 기어" to gear,
-        "차량 속도" to vehicle(live.freshSpeed(observedAt))?.let { "%.1f km/h".format(it*3.6) },
         "운전석 안전벨트" to vehicle(live.belt.takeIf { observedAt-live.beltAt in 0..2500 })?.let { if(it) "착용" else "미착용" },
-        "브레이크 페달" to vehicle(live.brake.takeIf { observedAt-live.brakeAt in 0..2500 })?.let { if(it) "밟음" else "해제" },
-        "방향지시등" to when(vehicle(live.turnSignal.takeIf { observedAt-live.turnAt in 0..1500 })) { "LEFT"->"좌측";"RIGHT"->"우측";"OFF"->"꺼짐";else->null },
         "핸들 각도" to vehicle(energy.steering)?.let { angle ->
             val magnitude = "%.1f°".format(abs(angle))
             // Pleos Vehicle reports clockwise steering-wheel rotation as negative.
@@ -74,7 +63,10 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
         "누적 주행거리" to vehicle(live.odometer.takeIf { observedAt-live.odometerAt in 0..5000 })?.let { "%,.1f km".format(it) },
         "전기차 배터리" to vehicle(energy.battery)?.let { "$it%" },
         "연료 잔량" to vehicle(energy.fuel)?.let { "$it%" },
-        "엔진오일 수위" to when(vehicle(energy.oil)) { "NORMAL"->"정상";"LOW"->"낮음";"CRITICALLY_LOW"->"매우 낮음";"HIGH"->"높음";else->null }
+        "엔진오일 수위" to when(vehicle(energy.oil)) { "NORMAL"->"정상";"LOW"->"낮음";"CRITICALLY_LOW"->"매우 낮음";"HIGH"->"높음";else->null },
+        "워셔액 부족 경고" to vehicle(energy.washerFluidLow)?.let {if(it) "보충 필요" else "없음"},
+        "이번 주행 전비" to vehicle(energy.evEfficiency)?.let {"%.1f km/kWh".format(it)},
+        "이번 주행 연비" to vehicle(energy.fuelEconomy)?.let {"%.1f L/100 km".format(it)}
     )
     Column(Modifier.fillMaxSize()) {
         Text("내 프로필과 차량 상태를 확인해요",fontSize=14.sp,color=ProfileMuted,modifier=Modifier.padding(top=4.dp,bottom=16.dp))
@@ -88,10 +80,10 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
                     Icon(Icons.Outlined.Edit,null,Modifier.size(16.dp)); Text("닉네임 변경",Modifier.padding(start=8.dp))
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick={replaySetup=true},enabled=enabled && vm.canChooseDestination && vm.trackedSpot==null) {
-                    Text("처음 설정 다시 보기",fontSize=14.sp)
+                TextButton(onClick={vm.restartTutorial()},enabled=enabled && vm.canChooseDestination && vm.trackedSpot==null) {
+                    Text("튜토리얼 다시보기",fontSize=14.sp)
                 }
-                Text("기록과 마일리지는 그대로 유지돼요",fontSize=11.sp,color=ProfileMuted)
+                Text("각 메뉴의 사용 방법을 다시 살펴봐요",fontSize=11.sp,color=ProfileMuted)
             }
             Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(24.dp)).background(Color.White).verticalScroll(rememberScrollState()).padding(20.dp)) {
                 Row(verticalAlignment=Alignment.CenterVertically) {
@@ -108,20 +100,20 @@ internal data class ProfileEnergy(val battery: Int?=null,val fuel: Int?=null,val
                         pair.forEach { (label,value) ->
                             Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(ProfilePaper).padding(horizontal=12.dp,vertical=8.dp)) {
                                 Text(label,fontSize=12.sp,color=ProfileMuted)
-                                Text(value ?: "미확인",fontSize=15.sp,fontWeight=FontWeight.SemiBold,color=if(value==null) ProfileMuted else ProfileInk)
+                                Text(value ?: "미확인",fontSize=15.sp,fontWeight=FontWeight.SemiBold,color=when {
+                                    value==null -> ProfileMuted
+                                    label=="워셔액 부족 경고" && vehicle(energy.washerFluidLow)==true -> Color(0xFFB3261E)
+                                    else -> ProfileInk
+                                })
                             }
                         }
+                        if(pair.size==1) Spacer(Modifier.weight(1f))
                     }
                 }
                 Text("차종·권한에 따라 일부 항목은 표시되지 않을 수 있어요.",fontSize=11.sp,color=ProfileMuted)
             }
         }
     }
-    if(replaySetup && enabled) AlertDialog(onDismissRequest={replaySetup=false},containerColor=Color.White,
-        title={Text("처음 안내를 다시 볼까요?")},
-        text={Text("소개·동의·닉네임·튜토리얼을 다시 확인해요. 주행 기록, 마일리지, 배지와 저장한 목적지는 삭제하지 않아요.")},
-        confirmButton={TextButton(onClick={replaySetup=false;vm.restartFirstRun()}) {Text("다시 시작")}},
-        dismissButton={TextButton(onClick={replaySetup=false}) {Text("취소")}})
     if(editing && enabled) {
         val trimmed=draft.trim()
         val valid=trimmed.isNotBlank() && trimmed.codePointCount(0,trimmed.length)<=16 && trimmed.none { it.isISOControl() }

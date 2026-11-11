@@ -20,6 +20,10 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             put("score",r.score);put("compliance",r.compliance);put("smoothness",r.smoothness)
             put("distance",r.validDistanceM);put("coverage",r.coverage);put("valid",r.valid)
             put("accelerationEvents",r.accelerationEvents);put("overLimitDistance",r.overLimitDistanceM)
+            put("events",JSONArray().apply {r.events.forEach {event -> put(JSONObject().apply {
+                put("type",event.type.name);put("elapsedMs",event.elapsedMs);put("distanceM",event.distanceM)
+                put("fromKph",event.fromKph);put("toKph",event.toKph);put("limitKph",event.limitKph)
+            })}})
             put("ranking",JSONArray().apply {value.ranking.forEach {put(JSONObject().apply {
                 put("id",it.id);put("score",it.score);put("rank",it.rank);put("miles",it.miles)
             })}})
@@ -34,7 +38,12 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             ChallengeSession(j.getString("id"),j.getString("destinationId"),j.getDouble("initialDistanceM"),Phase.FINISHED,
                 venueId=j.optString("venueId").takeIf {it.isNotEmpty()},competitionId=j.optString("competitionId").takeIf {it.isNotEmpty()}),
             ScoreReport(if(j.has("score")) j.getInt("score") else null,j.getDouble("compliance"),j.getDouble("smoothness"),
-                j.getDouble("distance"),j.getDouble("coverage"),j.getBoolean("valid"),j.getInt("accelerationEvents"),j.getDouble("overLimitDistance")),
+                j.getDouble("distance"),j.getDouble("coverage"),j.getBoolean("valid"),j.getInt("accelerationEvents"),j.getDouble("overLimitDistance"),
+                j.optJSONArray("events")?.let {events -> List(events.length()) {index ->
+                    val event=events.getJSONObject(index)
+                    DrivingEvent(DrivingEventType.valueOf(event.getString("type")),event.getLong("elapsedMs"),
+                        event.getDouble("distanceM"),event.getDouble("fromKph"),event.getDouble("toKph"),event.getInt("limitKph"))
+                }} ?: emptyList()),
             j.getString("name"),j.getBoolean("demo"),List(rows.length()) {i->rows.getJSONObject(i).let {RankedEntry(it.getString("id"),it.getInt("score"),it.getInt("rank"),it.getInt("miles"))}},
             j.getInt("earned"),j.getBoolean("missedDeadline"))
     }.getOrNull()

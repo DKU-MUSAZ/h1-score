@@ -123,10 +123,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         prefs.edit().putString("recent-destinations", JSONArray(recentDestinations).toString()).apply()
     }
     internal var onboardingRevision by mutableIntStateOf(0); private set
-    internal fun restartFirstRun(): Boolean {
+    internal fun restartTutorial(): Boolean {
         if(!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle()) return false
-        prefs.edit().remove("first-run-complete-v1").remove("first-run-consent-v1")
-            .remove("first-run-nickname-v1").remove("first-run-consent-at").commit()
+        if(!prefs.getBoolean("first-run-complete-v1",false)) return false
+        prefs.edit().putBoolean("tutorial-replay-v1",true).commit()
         onboardingRevision++
         screen=Screen.HOME
         return true

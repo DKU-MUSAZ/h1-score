@@ -76,11 +76,29 @@ class FirstRunUiTest {
         if(!video) {
             val balance=vm.balance
             val shortcuts=vm.destinationShortcuts
+            val setupBefore=prefs.all.filterKeys {it.startsWith("first-run-")}
             ui.runOnIdle {vm.navigate(Screen.PROFILE)}
-            ui.onNodeWithText("처음 설정 다시 보기").performClick()
-            ui.onNodeWithText("다시 시작").performClick()
-            ui.onNodeWithText("무사즈와 시작하기").assertIsDisplayed()
+            ui.onNodeWithText("튜토리얼 다시보기").performClick()
+            ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
+            ui.onNodeWithText("무사즈와 시작하기").assertDoesNotExist()
+            ui.onNodeWithText("동의하고 계속").assertDoesNotExist()
+            ui.onNodeWithText("어떻게 불러드릴까요?").assertDoesNotExist()
+            // Recreating the host during replay must reopen the menu tour, not setup.
+            ui.runOnIdle {generation++}
+            ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
+            repeat(4) {ui.onNodeWithText("다음").performClick()}
+            ui.onNodeWithText("무사즈와 출발하기").performClick()
+            ui.runOnIdle {generation++;vm.navigate(Screen.PROFILE)}
+            ui.onNodeWithText("목적지를 정해볼까요?").assertDoesNotExist()
+            // A second replay starts at the first menu and can be skipped.
+            ui.onNodeWithText("튜토리얼 다시보기").performClick()
+            ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
+            ui.onNodeWithText("건너뛰기").performClick()
+            ui.runOnIdle {generation++}
+            ui.onNodeWithText("목적지를 정해볼까요?").assertDoesNotExist()
             ui.runOnIdle {
+                assertEquals(setupBefore,prefs.all.filterKeys {it.startsWith("first-run-")})
+                assertFalse(prefs.getBoolean("tutorial-replay-v1",false))
                 assertEquals(balance,vm.balance)
                 assertEquals(shortcuts,vm.destinationShortcuts)
                 assertEquals("무사즈 친구",vm.nickname)
