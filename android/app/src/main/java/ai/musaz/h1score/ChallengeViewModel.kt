@@ -51,6 +51,9 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var notice by mutableStateOf<String?>(null)
     var completed by mutableIntStateOf(0); private set
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
+    private val completedDriveStore = CompletedDriveStore(prefs)
+    internal var completedDrives by mutableStateOf(completedDriveStore.readAll()); private set
+    internal var selectedHistoryRecord by mutableStateOf<CompletedDrive?>(null); private set
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
         private set
     internal var destinationShortcuts by mutableStateOf(readShortcuts())
@@ -413,9 +416,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         }
     }
     internal fun openCompletedResult() {
+        selectedHistoryRecord=null
         if(activeJourney) { screen=Screen.JOURNEY; return }
         if(report == null || phase != Phase.FINISHED) {
-            CompletedDriveStore(prefs).read()?.let { saved ->
+            completedDriveStore.read()?.let { saved ->
                 demo=saved.demo
                 ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
                 rankBadgeProgress=readRankBadgeProgress(rankBadgeKey)
@@ -443,13 +447,23 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }.getOrElse { notice="기록 서비스를 시작하지 못했어요. 다시 참가해 주세요."; false }
     fun navigate(to: Screen) {
         if(!parked && to != Screen.JOURNEY) { notice="주차 후 확인할 수 있어요"; return }
+        selectedHistoryRecord=null
+        if(to == Screen.HISTORY) completedDrives=completedDriveStore.readAll()
         screen=to
+    }
+    internal fun openHistoryRecord(id: String) {
+        if(!parked) { notice="주차 후 확인할 수 있어요"; return }
+        val saved=completedDrives.firstOrNull { it.session.id == id } ?: return
+        // Viewing an old result must not restore or settle it as the current journey.
+        selectedHistoryRecord=saved
+        screen=Screen.RESULT
     }
     fun selectDestination(d: Destination) { if (!parked || activeJourney) return; selected=d; remainingM=d.distanceKm*1000; report=null; session=null }
     fun switchSource() {
         if(activeJourney || awaitingMapRoute || !parked || !spotRecordingIdle()) return
         if(demo && !live.parked) { notice="실제 기기의 속도·P단·화면 제한을 먼저 확인해 주세요"; return }
         demo=!demo
+        selectedHistoryRecord=null
         pendingBadges=emptyList()
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
         rankBadgeProgress = readRankBadgeProgress(rankBadgeKey)
@@ -556,6 +570,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
         val r=ScoreEngine.evaluate(samples)
+        selectedHistoryRecord=null
         report=r
         missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
         val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
@@ -601,7 +616,9 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         if (voiceEnabled && uiVisible && parked)
             voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
         completedDestinationName=destinationName
-        CompletedDriveStore(prefs).save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline))
+        completedDriveStore.save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline,
+            completedAtEpochMs=System.currentTimeMillis()))
+        completedDrives=completedDriveStore.readAll()
         completed++
         screen=Screen.RESULT
         if (parked) RecordingService.notifyResult(getApplication())
