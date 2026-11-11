@@ -30,10 +30,17 @@ data class ChallengeSession(
 }
 
 data class Sample(val atMs: Long, val speedMps: Double?, val limitKph: Int?)
+enum class DrivingEventType { OVERSPEED, RAPID_ACCELERATION, RAPID_DECELERATION }
+/** Approximate position within valid sampled distance; not a GPS location. */
+data class DrivingEvent(
+    val type: DrivingEventType, val elapsedMs: Long, val distanceM: Double,
+    val fromKph: Double, val toKph: Double, val limitKph: Int,
+)
 data class ScoreReport(
     val score: Int?, val compliance: Double, val smoothness: Double,
     val validDistanceM: Double, val coverage: Double, val valid: Boolean,
     val accelerationEvents: Int, val overLimitDistanceM: Double,
+    val events: List<DrivingEvent> = emptyList(),
 )
 
 /** Prototype v0.1. These coefficients are hypotheses, not validated risk estimates. */
@@ -42,6 +49,8 @@ object ScoreEngine {
         var expectedMs = 0.0; var validMs = 0.0; var distance = 0.0
         var overspeedPenalty = 0.0; var overDistance = 0.0; var accelerationDistance = 0.0
         var accelerationEvents = 0; var wasAccelerating = false
+        var wasOverLimit = false; var wasDecelerating = false
+        val events = mutableListOf<DrivingEvent>()
         samples.zipWithNext().forEach { (a, b) ->
             val dt = (b.atMs - a.atMs) / 1000.0
             if (dt <= 0) return@forEach
@@ -49,7 +58,7 @@ object ScoreEngine {
             val v0 = a.speedMps; val v1 = b.speedMps; val limit = b.limitKph
             if (dt > 2.5 || v0 == null || v1 == null || !v0.isFinite() || !v1.isFinite() ||
                 v0 !in 0.0..80.0 || v1 !in 0.0..80.0 || limit == null || limit !in 1..150) {
-                wasAccelerating = false; return@forEach
+                wasAccelerating = false; wasOverLimit = false; wasDecelerating = false; return@forEach
             }
             validMs += dt
             val segment = (v0 + v1) / 2 * dt
@@ -58,6 +67,16 @@ object ScoreEngine {
             if (excess > 0) overDistance += segment
             overspeedPenalty += segment * (excess / 15.0).coerceIn(0.0, 1.0)
             val rapid = (v1 - v0) / dt > 2.5
+            val decelerating = (v1 - v0) / dt < -2.5
+            fun record(type: DrivingEventType) {
+                if(events.size < 100) events += DrivingEvent(type,
+                    (b.atMs - samples.first().atMs).coerceAtLeast(0), distance,
+                    v0 * 3.6, v1 * 3.6, limit)
+            }
+            if(excess > 0 && !wasOverLimit) record(DrivingEventType.OVERSPEED)
+            if(rapid && !wasAccelerating) record(DrivingEventType.RAPID_ACCELERATION)
+            if(decelerating && !wasDecelerating) record(DrivingEventType.RAPID_DECELERATION)
+            wasOverLimit = excess > 0; wasDecelerating = decelerating
             if (rapid) {
                 accelerationDistance += segment
                 if (!wasAccelerating) accelerationEvents++
@@ -69,7 +88,7 @@ object ScoreEngine {
         val smoothness = if (distance > 0) (100 - accelerationDistance / distance * 100).coerceIn(0.0,100.0) else 0.0
         val score = if (distance >= 500 && coverage >= .9) (compliance * .7 + smoothness * .3).roundToInt() else null
         return ScoreReport(score, compliance, smoothness, distance, coverage,
-            distance >= 9_000 && coverage >= .9, accelerationEvents, overDistance)
+            distance >= 9_000 && coverage >= .9, accelerationEvents, overDistance, events)
     }
 }
 

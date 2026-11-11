@@ -60,11 +60,11 @@ private val BadgeSecondaryText = BadgeInk.copy(alpha = .78f)
 private const val WelcomeBadgeTitle = "당신도 이제 무사즈!"
 private fun points(value: Int)=String.format(Locale.KOREA,"%,d",value)
 private enum class BadgeFamily(val title: String, val accent: Color, val tint: Color, val filterIcon: ImageVector) {
-    PARTICIPATION("챌린지", Color(0xFF237B66), Color(0xFFE9F5EE), Icons.Outlined.Flag),
+    PARTICIPATION("챌린지", H1Style.Ink, H1Style.PaleMint, Icons.Outlined.Flag),
     SCORE("안전운전", Color(0xFF4472AB), Color(0xFFEDF3FB), Icons.Outlined.VerifiedUser),
     RANK("랭킹", Color(0xFFAA792A), Color(0xFFFCF4E4), Icons.Outlined.Leaderboard),
     ROUTINE("주행 습관", Color(0xFF8270AC), Color(0xFFF2EEF8), Icons.Outlined.CalendarMonth),
-    SPOT("스팟투어", Color(0xFF2E6E75), Color(0xFFE8F5F6), Icons.Outlined.Map)
+    SPOT("스팟투어", H1Style.Ink, H1Style.PaleMint, Icons.Outlined.Map)
 }
 private data class CollectionBadge(
     val id: String,

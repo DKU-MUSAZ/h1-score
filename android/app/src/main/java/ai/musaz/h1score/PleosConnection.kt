@@ -61,7 +61,29 @@ class PleosConnection(private val context: Context) {
         val fuel=async { profileRead<Int> { ok, fail -> source.getFuel().getFuelPercent(ok,fail) } }
         val oil=async { profileRead<String> { ok, fail -> source.getSafety().getEngineOilLevelState({ ok(it?.name) },fail) } }
         val steering=async { profileRead<Float> { ok, fail -> source.getSteeringWheel().getCurrentSteeringWheelAngle(ok,fail) } }
-        val result=ProfileEnergy(battery.await()?.takeIf { it in 0..100 },fuel.await()?.takeIf { it in 0..100 },oil.await(),steering.await()?.takeIf { it.isFinite() })
+        val washerFluidLow=async { profileRead<Boolean> { ok, fail ->
+            source.getSafety().checkLowWasherFluidWarningStateCapabilities({ capability ->
+                if(readable(capability)) source.getSafety().hasLowWasherFluidWarning(ok,fail) else ok(null)
+            },fail)
+        } }
+        val evEfficiency=async { profileRead<Float> { ok, fail ->
+            source.getEvBattery().checkCurrentEvEfficiencyCapabilities({ capability ->
+                if(readable(capability)) source.getEvBattery().getCurrentEvEfficiency(ok,fail) else ok(null)
+            },fail)
+        } }
+        val fuelEconomy=async { profileRead<Float> { ok, fail ->
+            source.getFuel().checkCurrentFuelEconomyCapabilities({ capability ->
+                if(readable(capability)) source.getFuel().getCurrentFuelEconomy(ok,fail) else ok(null)
+            },fail)
+        } }
+        val result=ProfileEnergy(
+            battery=battery.await()?.takeIf { it in 0..100 },
+            fuel=fuel.await()?.takeIf { it in 0..100 },
+            oil=oil.await(), steering=steering.await()?.takeIf { it.isFinite() },
+            washerFluidLow=washerFluidLow.await(),
+            evEfficiency=evEfficiency.await()?.takeIf { it.isFinite() && it>=0f },
+            fuelEconomy=fuelEconomy.await()?.takeIf { it.isFinite() && it>=0f },
+        )
         if(active && vehicle===source) result else ProfileEnergy()
     }
 

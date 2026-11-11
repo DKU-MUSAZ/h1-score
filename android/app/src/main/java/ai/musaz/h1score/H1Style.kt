@@ -1,5 +1,6 @@
 package ai.musaz.h1score
 
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
@@ -9,9 +10,16 @@ internal object H1Style {
     val Muted=Color(0xFF73818F)
     val Paper=Color(0xFFF5F6F8)
     val Line=Color(0xFFE2E7EB)
-    val Mint=Color(0xFF74DFB2)
-    val Green=Color(0xFF176B54)
-    val PaleMint=Color(0xFFEAF7F0)
+    // Shared navy palette, including light accents for dark surfaces.
+    val Mint=Color(0xFFB9CDE5)
+    val Green=Ink
+    val PaleMint=Color(0xFFE9EFF7)
     val Gold=Color(0xFFBC8624)
-    val heroBackground get()=Brush.horizontalGradient(listOf(Color(0xFFE9EFE5),Color(0xFFE7EFF2)))
+    val heroBackground get()=Brush.horizontalGradient(listOf(Color(0xFFF0F4FA),Color(0xFFF7F9FC)))
+    val colorScheme get()=lightColorScheme(
+        primary=Ink,onPrimary=Color.White,primaryContainer=PaleMint,onPrimaryContainer=Ink,
+        secondary=Ink,onSecondary=Color.White,secondaryContainer=PaleMint,onSecondaryContainer=Ink,
+        tertiary=Ink,onTertiary=Color.White,tertiaryContainer=PaleMint,onTertiaryContainer=Ink,
+        background=Paper,onBackground=Ink,surface=Color.White,onSurface=Ink,
+    )
 }

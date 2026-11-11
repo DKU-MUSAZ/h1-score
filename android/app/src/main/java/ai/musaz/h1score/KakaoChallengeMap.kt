@@ -120,7 +120,7 @@ private fun challengeMarker(name: String, participantCount: Int, deadlineLabel: 
     val canvas = Canvas(bitmap)
     val center = 172f
     val ink = Color.rgb(21, 45, 76)
-    val mint = Color.rgb(137, 238, 194)
+    val mint = Color.rgb(185, 205, 229)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
 
     paint.color = Color.argb(46, 21, 45, 76)

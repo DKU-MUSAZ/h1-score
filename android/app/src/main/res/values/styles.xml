@@ -6,6 +6,6 @@
         <item name="android:navigationBarColor">#F6F7F9</item>
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#126B56</item>
+        <item name="android:colorAccent">#152D4C</item>
     </style>
 </resources>
