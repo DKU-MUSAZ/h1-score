@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.*
@@ -118,6 +119,7 @@ private val Gold=H1Style.Gold
     var destinations by remember { mutableStateOf(false) }
     var simulator by remember { mutableStateOf(false) }
     var badgeReveal by remember { mutableStateOf(false) }
+    var historyDateOrder by rememberSaveable { mutableStateOf(HistoryDateOrder.NEWEST_FIRST) }
     LaunchedEffect(vm.parked) { if(!vm.parked) { destinations=false; simulator=false; badgeReveal=false } }
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
@@ -193,7 +195,7 @@ private val Gold=H1Style.Gold
                             onCancelSpot = vm::cancelSpotVisit,
                             onChallenge = { vm.navigate(Screen.HOME) }
                         )
-                        Screen.HISTORY -> History(vm)
+                        Screen.HISTORY -> History(vm,historyDateOrder) { historyDateOrder=it }
                         Screen.CONNECTION -> ConnectionScreen(vm)
                         Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
                     }
@@ -605,19 +607,35 @@ private val Gold=H1Style.Gold
     }
 }
 
-@Composable private fun History(vm:ChallengeViewModel) {
+@Composable private fun History(vm:ChallengeViewModel,dateOrder:HistoryDateOrder,onDateOrder:(HistoryDateOrder)->Unit) {
     if(vm.completedDrives.isEmpty()) { EmptyState("첫 드라이브를 기다리고 있어요","참가한 이동의 주행습관과 결과를 이곳에 모아드릴게요.") { vm.navigate(Screen.HOME) };return }
+    val records=remember(vm.completedDrives,dateOrder) { historyByDate(vm.completedDrives,dateOrder) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Text("저장된 주행 기록",color=Muted,fontSize=14.sp,modifier=Modifier.padding(bottom=20.dp))
-        vm.completedDrives.forEach { record -> key(record.session.id) {
-        Surface(onClick={vm.openHistoryRecord(record.session.id)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth().padding(bottom=20.dp)) {
-            Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
-                Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
-                Column(Modifier.weight(1f).padding(start=20.dp)) { Text(record.name,fontSize=24.sp,fontWeight=FontWeight.Bold);Text("유효 거리 ${"%.1f".format(record.report.validDistanceM/1000)} km  ·  ${if(record.demo) "시연 기록" else "SDK 기록"}",color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=8.dp)) }
-                Text("${record.report.score ?: "—"}",fontSize=40.sp,color=Green);Text(" 점",color=Muted);Icon(Icons.Outlined.ChevronRight,null,Modifier.padding(start=28.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom=20.dp),verticalAlignment=Alignment.CenterVertically) {
+            Text("저장된 주행 기록",color=Muted,fontSize=14.sp)
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.selectableGroup(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                listOf(HistoryDateOrder.NEWEST_FIRST to "최신순",HistoryDateOrder.OLDEST_FIRST to "오래된순").forEach { (order,label) ->
+                    FilterChip(selected=dateOrder==order,onClick={onDateOrder(order)},label={Text(label)},
+                        leadingIcon=if(dateOrder==order) { { Icon(Icons.Outlined.Check,null,Modifier.size(18.dp)) } } else null)
+                }
             }
         }
-        } }
+        records.forEach { record ->
+            key(record.session.id) {
+                Surface(onClick={vm.openHistoryRecord(record.session.id)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth().padding(bottom=20.dp)) {
+                    Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
+                        Column(Modifier.weight(1f).padding(start=20.dp)) {
+                            Text(record.name,fontSize=24.sp,fontWeight=FontWeight.Bold)
+                            Text(historyDateLabel(record.completedAtEpochMs),color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=8.dp))
+                            Text("유효 거리 ${"%.1f".format(record.report.validDistanceM/1000)} km  ·  ${if(record.demo) "시연 기록" else "SDK 기록"}",color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=4.dp))
+                        }
+                        Text("${record.report.score ?: "—"}",fontSize=40.sp,color=Green);Text(" 점",color=Muted);Icon(Icons.Outlined.ChevronRight,null,Modifier.padding(start=28.dp))
+                    }
+                }
+            }
+        }
     }
 }
 

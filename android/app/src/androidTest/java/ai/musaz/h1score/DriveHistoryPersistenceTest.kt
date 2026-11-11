@@ -14,6 +14,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -124,6 +125,40 @@ class DriveHistoryPersistenceTest {
         assertEquals(originalPreferences, app.prefs.all)
     }
 
+    @Test fun historyDatesAndSortControlsPreserveRecordSelectionAndSavedData() {
+        val app = application()
+        val first = drive("earlier", Instant.parse("2026-11-10T23:35:00Z").toEpochMilli(), false, 91)
+        val second = drive("later", Instant.parse("2026-11-11T00:10:00Z").toEpochMilli(), true, 78)
+        CompletedDriveStore(app.prefs).apply { save(first); save(second) }
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val originalPreferences = app.prefs.all.toMap()
+        val originalRecords = vm.completedDrives.toList()
+        ui.setContent { H1App(vm) }
+
+        ui.onNodeWithText("주행일 2026.11.11 08:35").assertIsDisplayed()
+        ui.onNodeWithText("주행일 2026.11.11 09:10").assertIsDisplayed()
+        ui.onNodeWithText("최신순").assertIsSelected()
+        assertHistoryAbove(second, first)
+
+        ui.onNodeWithText("오래된순").performClick().assertIsSelected()
+        assertHistoryAbove(first, second)
+        ui.onNodeWithText(first.name).performClick()
+        ui.runOnIdle {
+            assertEquals(first, vm.selectedHistoryRecord)
+            assertEquals(Screen.RESULT, vm.screen)
+        }
+        ui.onNodeWithText(first.name).assertIsDisplayed()
+        ui.onNodeWithText("91").assertIsDisplayed()
+
+        ui.onNodeWithText("내 기록").performClick()
+        ui.onNodeWithText("오래된순").assertIsSelected()
+        assertHistoryAbove(first, second)
+        ui.onNodeWithText("최신순").performClick().assertIsSelected()
+        assertHistoryAbove(second, first)
+        ui.runOnIdle { assertEquals(originalRecords, vm.completedDrives) }
+        assertEquals(originalPreferences, app.prefs.all)
+    }
+
     @Test fun openingHistoryDoesNotReplaceAnActiveJourneyOrCreditRewardsAgain() {
         val app = application()
         val saved = drive("saved", 1_000L, false)
@@ -178,6 +213,12 @@ class DriveHistoryPersistenceTest {
             "저장 목적지 $id", demo, listOf(RankedEntry("나", score, 1, 80)), 80, false,
             completedAtEpochMs = time,
         )
+    }
+
+    private fun assertHistoryAbove(above: CompletedDrive, below: CompletedDrive) {
+        val first = ui.onNodeWithText(above.name).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val second = ui.onNodeWithText(below.name).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue("${above.name} should appear before ${below.name}", first.top < second.top)
     }
 
     /** Exact legacy shape: no history fields and no PR4 event array. */
