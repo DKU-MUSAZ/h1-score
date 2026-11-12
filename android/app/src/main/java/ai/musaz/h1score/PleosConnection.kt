@@ -32,13 +32,19 @@ import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
 import ai.pleos.playground.navi.data.NavigationScreenRequest
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.DestinationArrivedInfo
+import ai.pleos.playground.navi.data.RouteStartInfo
 import ai.pleos.playground.navi.constants.NaviErrorCode
+import ai.pleos.playground.navi.constants.NavigationStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
 
 internal val hangangVenue = GeoPoint(37.52639977, 126.93360958)
+internal const val SCORING_SPEED_REQUEST_HZ = 20f
+// NaviHelper 3.0.5 sends the road limit every second, including unchanged values.
+// Allow a bounded delivery delay; other navigation/vehicle updates never extend this lease.
+internal const val NAVIGATION_SPEED_LIMIT_MAX_AGE_MS = 5_000L
 
 data class LiveVehicle(
     val destination: String? = null, val destinationId: String? = null,
@@ -70,7 +76,7 @@ data class LiveVehicle(
         else if (beltWarningOffAt?.let { now-it in 0..2500 } == true) true else null
     val beltConditionMet: Boolean get() = freshBelt(SystemClock.elapsedRealtime()) == true
     fun freshSpeed(now: Long) = speedMps.takeIf { now - speedAt in 0..2_500 }
-    fun freshLimit(now: Long) = limitKph.takeIf { now - limitAt in 0..2_500 }
+    fun freshLimit(now: Long) = limitKph.takeIf { now - limitAt in 0..NAVIGATION_SPEED_LIMIT_MAX_AGE_MS }
 }
 
 /** Main-thread buffer: wakeups never remove a sample before its collector actually runs. */
@@ -281,9 +287,9 @@ class PleosConnection(private val context: Context) {
             val config = manager.getCarPropertyConfig(VehiclePropertyIds.PERF_VEHICLE_SPEED)
                 ?: error("차량 속도 속성 미지원 또는 읽기 권한 없음")
             check(config.maxSampleRate > 0f) { "연속 속도 표본 미지원" }
-            // Match the source branch: normal capture requests 10 Hz; explicit console
-            // tests request headroom without changing the engine's >=8 Hz quality guard.
-            val requestedRate = if (consoleCapture) 20f else 10f
+            // Pleos may deliver fewer callbacks than requested. Normal recording needs the
+            // same request headroom as console capture; actual >=8 Hz is still verified.
+            val requestedRate = SCORING_SPEED_REQUEST_HZ
             val rate = requestedRate.coerceIn(config.minSampleRate, config.maxSampleRate)
             val callback = object : CarPropertyManager.CarPropertyEventCallback {
                 override fun onChangeEvent(value: CarPropertyValue<*>) {
@@ -354,6 +360,9 @@ class PleosConnection(private val context: Context) {
         capabilities()
     }
     private fun navigationEvents(source: NaviHelper, epoch: Int) = object : NaviHelperEventListener {
+        override fun onRouteStarted(routeStartInfo: RouteStartInfo) = withCurrentNavigation(source, epoch) {
+            state.update { it.copy(limitKph=null,limitAt=0,instruction=null,instructionAt=0) }
+        }
         override fun onTBTInfo(tbtInfoList: List<TBTInfo>) {
             val receivedAt = SystemClock.elapsedRealtime()
             val next=tbtInfoList.firstOrNull()
@@ -370,37 +379,58 @@ class PleosConnection(private val context: Context) {
         override fun onDestinationInfo(destinationInfo: DestinationInfo) {
             val receivedAt = SystemClock.elapsedRealtime()
             val key = "${destinationInfo.poiProvider}:${destinationInfo.poiId}:${destinationInfo.latitude}:${destinationInfo.longitude}"
+            val destination = destinationInfo.name.takeIf { it.isNotBlank() }
+            val destinationId = key.takeIf { destination != null }
             withCurrentNavigation(source, epoch) {
-                state.update { it.copy(destination = destinationInfo.name.takeIf { name -> name.isNotBlank() }, destinationId = key.takeIf { destinationInfo.name.isNotBlank() },
-                    destinationPoint = GeoPoint(destinationInfo.latitude, destinationInfo.longitude),
-                    routeCancelled = false, arrived = if(it.destinationId == key) it.arrived else false,
-                    arrivedAt = it.arrivedAt.takeIf { _ -> it.destinationId == key }, remainingM = destinationInfo.remainDistance.toDouble().takeIf { d -> d >= 0 }, destinationAt = receivedAt) }
+                state.update {
+                    // Some providers report the new destination without a preceding change
+                    // event. Do not carry the old route's road limit into that destination.
+                    val changed = it.destinationId != null && it.destinationId != destinationId
+                    it.copy(destination = destination, destinationId = destinationId,
+                        destinationPoint = GeoPoint(destinationInfo.latitude, destinationInfo.longitude),
+                        routeCancelled = false, arrived = if(it.destinationId == key) it.arrived else false,
+                        arrivedAt = it.arrivedAt.takeIf { _ -> it.destinationId == key },
+                        remainingM = destinationInfo.remainDistance.toDouble().takeIf { d -> d >= 0 }, destinationAt = receivedAt,
+                        limitKph = if(changed) null else it.limitKph, limitAt = if(changed) 0 else it.limitAt)
+                }
                 status("NaviHelper", "목적지 수신 · ${destinationInfo.remainDistance} m")
             }
         }
         override fun onCurrentRoadSpeedLimit(speedLimit: Int) {
             val receivedAt = SystemClock.elapsedRealtime()
             withCurrentNavigation(source, epoch) {
-                state.update { it.copy(limitKph = speedLimit.takeIf { s -> s in 1..150 }, limitAt = receivedAt) }
+                val validLimit = speedLimit.takeIf { it in 1..150 }
+                state.update { it.copy(limitKph = validLimit, limitAt = if(validLimit != null) receivedAt else 0) }
                 status("제한속도", "$speedLimit km/h · 콜백 수신")
             }
         }
         override fun onDestinationArrived(destinationArrivedInfo: DestinationArrivedInfo) {
             val receivedAt = Instant.now()
-            withCurrentNavigation(source, epoch) { state.update { it.copy(arrived = true, arrivedAt = it.arrivedAt ?: receivedAt) } }
+            withCurrentNavigation(source, epoch) {
+                // Pending samples keep their own limit snapshot, so arrival can invalidate
+                // future input while the recorder still drains its final pre-arrival samples.
+                state.update { it.copy(arrived = true, arrivedAt = it.arrivedAt ?: receivedAt,limitKph=null,limitAt=0) }
+            }
         }
         override fun onDestinationChanged() = withCurrentNavigation(source, epoch) {
-            state.update { it.copy(arrived = false, arrivedAt = null, routeCancelled = false, limitKph = null,instruction=null,instructionAt=0) }
+            state.update { it.copy(arrived = false, arrivedAt = null, routeCancelled = false, limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
             source.getDestinationInfo()
         }
         override fun onRouteCancelled() = withCurrentNavigation(source, epoch) {
-            state.update { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,arrived = false,arrivedAt = null,destinationPoint = null,routeCancelled = true,instruction=null,instructionAt=0) }
+            state.update { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,limitAt=0,arrived = false,arrivedAt = null,destinationPoint = null,routeCancelled = true,instruction=null,instructionAt=0) }
         }
         override fun onReRouteEnded() = withCurrentNavigation(source, epoch) {
-            state.update { it.copy(limitKph = null,instruction=null,instructionAt=0) }
+            state.update { it.copy(limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
             source.getDestinationInfo()
         }
+        override fun onNavigationStatus(status: NavigationStatus) = withCurrentNavigation(source, epoch) {
+            if (status == NavigationStatus.INACTIVE || status == NavigationStatus.INITIALIZING)
+                state.update { it.copy(limitKph=null,limitAt=0) }
+        }
         override fun onError(errorCode: NaviErrorCode) = withCurrentNavigation(source, epoch) {
+            // Low battery is an unrelated warning, not evidence that the road limit is stale.
+            if (errorCode != NaviErrorCode.CAUSE_LOW_BATTERY)
+                state.update { it.copy(limitKph=null,limitAt=0) }
             status("NaviHelper", "대기 / ${errorCode.name}")
         }
     }
@@ -452,9 +482,15 @@ class PleosConnection(private val context: Context) {
                     naviReady = true; helper.addListener(events); helper.getDestinationInfo(); status("NaviHelper", "연결됨 · 목적지 대기")
                 }
             }, onFailed = { failure -> withCurrentNavigation(helper, connectionGeneration) {
+                naviReady = false
+                state.update { it.copy(limitKph=null,limitAt=0) }
                 status("NaviHelper", "연결 실패 · ${failure.javaClass.simpleName}")
             } })
-        }.onFailure { status("NaviHelper", it.javaClass.simpleName) }
+        }.onFailure {
+            naviReady = false
+            state.update { it.copy(limitKph=null,limitAt=0) }
+            status("NaviHelper", it.javaClass.simpleName)
+        }
         runCatching {
             car = Car.createCar(context, main, Car.CAR_WAIT_TIMEOUT_DO_NOT_WAIT) { connectedCar, ready ->
                 if (!active || connectionGeneration != generation) return@createCar

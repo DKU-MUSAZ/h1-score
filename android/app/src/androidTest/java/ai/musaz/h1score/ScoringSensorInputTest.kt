@@ -83,8 +83,9 @@ class ScoringSensorInputTest {
         assertEquals(true, vehicle.freshBelt(now + 2_500))
         assertNull(vehicle.freshBelt(now + 2_501))
         assertNull(vehicle.freshBelt(now - 1))
-        assertEquals(50, vehicle.freshLimit(now + 2_500))
-        assertNull(vehicle.freshLimit(now + 2_501))
+        assertEquals(50, vehicle.freshLimit(now + 3_000))
+        assertEquals(50, vehicle.freshLimit(now + NAVIGATION_SPEED_LIMIT_MAX_AGE_MS))
+        assertNull(vehicle.freshLimit(now + NAVIGATION_SPEED_LIMIT_MAX_AGE_MS + 1))
         assertNull(vehicle.freshLimit(now - 1))
         assertTrue(vehicle.isParked(now))
         assertFalse(vehicle.isParked(now - 1))
@@ -104,7 +105,15 @@ class ScoringSensorInputTest {
         val connection = PleosConnection(context)
         var observations = emptyList<Sample>()
         try {
-            ui.runOnIdle { connection.setConsoleCapture(true); connection.start() }
+            ui.runOnIdle { connection.start() }
+            // The app connects before the user starts a console session. Initial SDK
+            // capability/belt reads can block cold-start delivery; keep them outside
+            // the explicitly started test trip rather than relaxing its quality guard.
+            ui.waitUntil(20_000) {
+                connection.flow.value.statuses["Seat"] in
+                    listOf("버클 잠김", "버클 열림", "운전석 영역 미지원")
+            }
+            ui.runOnIdle { connection.drainPendingSamples(); connection.setConsoleCapture(true) }
             observations = runBlocking {
                 withContext(Dispatchers.Main) {
                     withTimeout(15_000) {
@@ -120,6 +129,11 @@ class ScoringSensorInputTest {
             assertTrue("A source timestamp cannot be manufactured in the future",
                 observations.last().speedTimestampNanos <= SystemClock.elapsedRealtimeNanos())
             val analysis = LongitudinalDetector.evaluate(observations)
+            android.util.Log.i("H1ScoringInputTest", "console samples=${observations.size}, " +
+                "hz=${analysis.sampleRateHz}, coverage=${analysis.coverage}, " +
+                "largestSourceGapsMs=${observations.zipWithNext().map { (a, b) ->
+                    (b.speedTimestampNanos - a.speedTimestampNanos) / 1_000_000.0
+                }.sortedDescending().take(5)}")
             assertTrue("Actual speed feed was ${analysis.sampleRateHz} Hz; status=${connection.flow.value.statuses["차량 속도"]}",
                 analysis.sampleRateHz >= LongitudinalRules.MIN_SAMPLE_RATE_HZ)
             assertTrue("Speed intervals must remain continuous enough for scoring: ${analysis.coverage}",
@@ -131,9 +145,9 @@ class ScoringSensorInputTest {
         android.util.Log.i("H1ScoringInputTest", "actualSamples=${observations.size}, hz=${LongitudinalDetector.evaluate(observations).sampleRateHz}")
     }
 
-    /** Diagnostic, not a claim that this vehicle satisfies the engine's >=8 Hz requirement. */
+    /** Verify actual source cadence at the same requested rate as ordinary production capture. */
     @Suppress("DEPRECATION")
-    @Test fun normalTenHzRequestReportsActualSourceFrequency() {
+    @Test fun normalSpeedRequestMeetsLongitudinalFrequencyRequirement() {
         val context = ui.activity.applicationContext
         assertEquals(PackageManager.PERMISSION_GRANTED,
             context.checkSelfPermission("android.car.permission.CAR_SPEED"))
@@ -154,7 +168,7 @@ class ScoringSensorInputTest {
                             manager = source
                             val config = requireNotNull(source.getCarPropertyConfig(VehiclePropertyIds.PERF_VEHICLE_SPEED))
                             check(config.maxSampleRate > 0f)
-                            val rate = 10f.coerceIn(config.minSampleRate, config.maxSampleRate)
+                            val rate = SCORING_SPEED_REQUEST_HZ.coerceIn(config.minSampleRate, config.maxSampleRate)
                             val listener = object : CarPropertyManager.CarPropertyEventCallback {
                                 override fun onChangeEvent(value: CarPropertyValue<*>) {
                                     if (value.propertyId != VehiclePropertyIds.PERF_VEHICLE_SPEED) return
@@ -192,6 +206,9 @@ class ScoringSensorInputTest {
             val sourceSeconds = (observations.last().speedTimestampNanos - observations.first().speedTimestampNanos) / 1e9
             assertTrue("The vehicle source clock must advance", sourceSeconds > 0.0)
             val analysis = LongitudinalDetector.evaluate(observations)
+            assertTrue("Normal capture must preserve enough real source samples: ${analysis.sampleRateHz} Hz",
+                analysis.sampleRateHz >= LongitudinalRules.MIN_SAMPLE_RATE_HZ)
+            assertTrue("Normal speed intervals must meet the unchanged quality guard", analysis.ready)
             android.util.Log.i("H1ScoringInputTest",
                 "normalRequestedHz=$requestedHz, sourceCallbacks=${observations.size}, " +
                     "observedHz=${(observations.size - 1) / sourceSeconds}, " +
@@ -204,6 +221,6 @@ class ScoringSensorInputTest {
             }
             received.close()
         }
-        assertEquals("The frequency diagnostic must not change saved data", before, preferences.all)
+        assertEquals("Reading vehicle speed must not change saved data", before, preferences.all)
     }
 }

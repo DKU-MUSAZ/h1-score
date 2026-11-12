@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
+import kotlinx.coroutines.delay
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
@@ -94,7 +96,17 @@ class ScoringIntegrationTest {
             report = report, completedAtEpochMs = 2_000, scoringVersion = ScoreEngine.VERSION)
         CompletedDriveStore(app.prefs).apply { save(legacy); save(newDrive) }
         val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parked()); navigate(Screen.HISTORY) } }
-        ui.setContent { MinimumFrame(vm) }
+        ui.setContent {
+            // This UI-only model has no vehicle stream. Refresh the simulated park
+            // state while opening dialogs and returning to the history list.
+            LaunchedEffect(vm) {
+                while (true) {
+                    vm.receiveVehicle(parked())
+                    delay(200)
+                }
+            }
+            MinimumFrame(vm)
+        }
         ui.onNodeWithText("새 산식 주행").performScrollTo().performClick()
         ui.onNodeWithText("운전 습관 요약").assertIsDisplayed()
         ui.onNodeWithText("주요 주행 구간").assertIsDisplayed()
@@ -108,6 +120,7 @@ class ScoringIntegrationTest {
         ui.onNode(hasText("기본 60", substring = true) and hasAnyAncestor(isDialog())).assertExists()
         ui.onNodeWithContentDescription("닫기").performClick()
         ui.onNodeWithContentDescription("기록 목록으로").performClick()
+        ui.runOnIdle { assertEquals(Screen.HISTORY, vm.screen) }
         ui.onNodeWithText(legacy.name).performScrollTo().performClick()
         ui.onNodeWithText("70% 반영", substring = true).assertIsDisplayed()
         ui.onNodeWithText("30% 반영", substring = true).assertIsDisplayed()
