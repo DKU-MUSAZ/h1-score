@@ -642,26 +642,32 @@ private val Gold=H1Style.Gold
     if(vm.completedDrives.isEmpty()) { EmptyState("첫 드라이브를 기다리고 있어요","참가한 이동의 주행습관과 결과를 이곳에 모아드릴게요.") { vm.navigate(Screen.HOME) };return }
     val records=remember(vm.completedDrives,dateOrder,selectedDate) { historyByDate(historyForDay(vm.completedDrives,selectedDate),dateOrder) }
     val recordDates=remember(vm.completedDrives) { vm.completedDrives.mapNotNull { historyDate(it.completedAtEpochMs) }.toSet() }
+    val calendarWidth=368.dp
+    val columnSpacing=20.dp
+    val chipSpacing=8.dp
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(bottom=20.dp),verticalAlignment=Alignment.CenterVertically) {
-            Text("저장된 주행 기록",color=Muted,fontSize=14.sp)
-            Spacer(Modifier.weight(1f))
-            FilterChip(selected=selectedDate==null,onClick={onDateSelected(null)},label={Text("전체 기록")})
-            Spacer(Modifier.width(16.dp))
-            Row(Modifier.selectableGroup(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                listOf(HistoryDateOrder.NEWEST_FIRST to "최신순",HistoryDateOrder.OLDEST_FIRST to "오래된순").forEach { (order,label) ->
-                    FilterChip(selected=dateOrder==order,onClick={onDateOrder(order)},label={Text(label)},
-                        leadingIcon=if(dateOrder==order) { { Icon(Icons.Outlined.Check,null,Modifier.size(18.dp)) } } else null)
+        Row(Modifier.fillMaxWidth().padding(bottom=12.dp),horizontalArrangement=Arrangement.spacedBy(columnSpacing),verticalAlignment=Alignment.CenterVertically) {
+            Text("저장된 주행 기록",Modifier.width(calendarWidth),color=Muted,fontSize=14.sp)
+            Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
+                Text(selectedDate?.let { "${it.year}.${"%02d".format(it.monthValue)}.${"%02d".format(it.dayOfMonth)} · ${records.size}건" }
+                    ?: "전체 ${records.size}건",color=Muted,fontSize=14.sp)
+                Spacer(Modifier.weight(1f))
+                Row(horizontalArrangement=Arrangement.spacedBy(chipSpacing)) {
+                    FilterChip(selected=selectedDate==null,onClick={onDateSelected(null)},label={Text("전체 기록")})
+                    Row(Modifier.selectableGroup(),horizontalArrangement=Arrangement.spacedBy(chipSpacing)) {
+                        listOf(HistoryDateOrder.NEWEST_FIRST to "최신순",HistoryDateOrder.OLDEST_FIRST to "오래된순").forEach { (order,label) ->
+                            FilterChip(selected=dateOrder==order,onClick={onDateOrder(order)},label={Text(label)},
+                                leadingIcon=if(dateOrder==order) { { Icon(Icons.Outlined.Check,null,Modifier.size(18.dp)) } } else null)
+                        }
+                    }
                 }
             }
         }
-        Row(Modifier.weight(1f).fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(20.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(columnSpacing),verticalAlignment=Alignment.Top) {
             HistoryCalendar(month,selectedDate,recordDates,onMonthChange,{onDateSelected(it)},
-                Modifier.width(368.dp).verticalScroll(rememberScrollState()))
+                Modifier.width(calendarWidth).verticalScroll(rememberScrollState()))
             key(selectedDate,dateOrder) {
                 Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                    Text(selectedDate?.let { "${it.year}.${"%02d".format(it.monthValue)}.${"%02d".format(it.dayOfMonth)} · ${records.size}건" }
-                        ?: "전체 ${records.size}건",color=Muted,fontSize=14.sp,modifier=Modifier.padding(bottom=16.dp))
                     if(records.isEmpty()) {
                         Surface(color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(28.dp)) {
