@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -27,6 +29,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
+import java.io.File
 import java.util.UUID
 import kotlin.math.min
 
@@ -114,7 +117,7 @@ class ScoringIntegrationTest {
         ui.onAllNodes(hasScrollAction()).assertCountEquals(0)
         ui.onAllNodesWithText("70% 반영", substring = true).assertCountEquals(0)
         val dial = ui.onNodeWithContentDescription("주행습관 점수 원").fetchSemanticsNode().boundsInRoot
-        val formula = ui.onNodeWithText("기본 60점", substring = true).fetchSemanticsNode().boundsInRoot
+        val formula = ui.onNodeWithTag("saved-score-breakdown").fetchSemanticsNode().boundsInRoot
         assertTrue("Score dial must not overlap the formula at minimum height", dial.bottom <= formula.top + 1f)
         ui.onNodeWithText("피드백 전체보기").performClick()
         ui.onNode(hasText("기본 60", substring = true) and hasAnyAncestor(isDialog())).assertExists()
@@ -122,8 +125,23 @@ class ScoringIntegrationTest {
         ui.onNodeWithContentDescription("기록 목록으로").performClick()
         ui.runOnIdle { assertEquals(Screen.HISTORY, vm.screen) }
         ui.onNodeWithText(legacy.name).performScrollTo().performClick()
-        ui.onNodeWithText("70% 반영", substring = true).assertIsDisplayed()
-        ui.onNodeWithText("30% 반영", substring = true).assertIsDisplayed()
+        val legacyBitmap = ui.onRoot().captureToImage().asAndroidBitmap()
+        File(ui.activity.filesDir, "history-detail-legacy.png").outputStream().use {
+            legacyBitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+        val legacyLayout = "Legacy detail bounds: " +
+            "70%=${ui.onNodeWithText("70% 반영", substring = true).fetchSemanticsNode().boundsInRoot}, " +
+            "30%=${ui.onNodeWithText("30% 반영", substring = true).fetchSemanticsNode().boundsInRoot}, " +
+            "scoreCard=${ui.onNodeWithTag("saved-score-card").fetchSemanticsNode().boundsInRoot}, " +
+            "dial=${ui.onNodeWithContentDescription("주행습관 점수 원").fetchSemanticsNode().boundsInRoot}, " +
+            "root=${ui.onRoot().fetchSemanticsNode().boundsInRoot}"
+        android.util.Log.i("SavedDetailLayoutTest", legacyLayout)
+        try {
+            ui.onNodeWithText("70% 반영", substring = true).assertIsDisplayed()
+            ui.onNodeWithText("30% 반영", substring = true).assertIsDisplayed()
+        } catch (failure: AssertionError) {
+            throw AssertionError("$legacyLayout\n${failure.message}", failure)
+        }
         assertEquals(legacy, CompletedDriveStore(app.prefs).readAll().single { it.session.id == "legacy-92" })
     }
 

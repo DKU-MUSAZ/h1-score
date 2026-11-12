@@ -21,7 +21,8 @@ internal fun historyFeedback(report: ScoreReport): HistoryFeedback {
     val overDistance = historyFeedbackDistance(report.overLimitDistanceM)
     val metrics = listOf(
         HistoryFeedbackMetric("과속", overDistance, "제한속도 초과 거리"),
-        HistoryFeedbackMetric("급가속", if (longitudinalPending && report.accelerationEvents == 0) "판정 보류" else "${report.accelerationEvents}회", "기록된 급가속"),
+        HistoryFeedbackMetric("급가속", if (longitudinalPending && report.accelerationEvents == 0) "판정 보류" else "${report.accelerationEvents}회",
+            if (bonus) "해당 구간 가점 제외" else "기록된 급가속"),
         HistoryFeedbackMetric("급감속", when {
             bonus && !longitudinalPending -> "${decelerations}회"
             decelerations > 0 -> "확인 ${decelerations}건"

@@ -193,6 +193,128 @@ class ScoringDownstreamTest {
         }
     }
 
+    @Test fun demoScoreCreditsMileageAndBadgesOnceThenRestoresTheSameHistory() {
+        val app = application()
+        val legacy = legacyDrive()
+        CompletedDriveStore(app.prefs).save(legacy)
+        val production = ui.activity.applicationContext.getSharedPreferences("h1-demo-v1", 0)
+        val productionBefore = production.all.toMap()
+        val day = LocalDate.now(ChallengeRound.seoul)
+        val vm = ui.runOnIdle {
+            model(app).apply {
+                receiveVehicle(parked())
+                switchSource()
+                chooseDemoDrive(DemoDrive.GOOD)
+                val now = Instant.now()
+                accept(ChallengeRound("적립 연동 검증", now.minusSeconds(60), now.plusSeconds(600)))
+                runDemo()
+            }
+        }
+        // Exercise the production demo recorder and settlement, not a prefilled score or ledger.
+        ui.waitUntil(40_000) { vm.phase == Phase.FINISHED && !vm.demoRunning }
+        val first = ui.runOnIdle {
+            val report = requireNotNull(vm.report)
+            assertEquals(95, report.score)
+            assertEquals(10_000.0, report.validDistanceM, 1e-8)
+            assertEquals(ScoreEngine.VERSION, report.scoringVersion)
+            assertTrue(report.longitudinalReady)
+            assertTrue(report.longitudinalSampleRateHz >= 8.0)
+            val own = vm.ranking.single { it.id == "나" }
+            assertEquals(1, own.rank)
+            assertEquals(100, own.miles)
+            assertEquals(100, vm.earned)
+            assertEquals(100, vm.balance)
+            assertEquals(95, vm.collectionProgress.weeklyScoreAverage(day))
+            assertEquals(1, vm.collectionProgress.scoreDays(95))
+            assertEquals(1, vm.rankBadgeProgress.days(RankBadgeGoal.FIRST_RANK))
+            assertTrue("top-three" in vm.ownedBadges)
+            assertEquals(0, CollectionProgressStore(app.prefs).read(false).challengeDays)
+            CompletedDriveStore(app.prefs).readAll().single { it.session.id != legacy.session.id }.also {
+                assertEquals(report, it.report)
+                assertEquals(100, it.earned)
+            }
+        }
+        val restored = ui.runOnIdle {
+            stores.last().clear()
+            model(app).apply {
+                receiveVehicle(parked())
+                openCompletedResult()
+                assertTrue(demo)
+                assertEquals(first.report, report)
+                assertEquals(100, earned)
+                assertEquals(100, balance)
+                assertEquals(95, collectionProgress.weeklyScoreAverage(day))
+                assertEquals(1, rankBadgeProgress.days(RankBadgeGoal.FIRST_RANK))
+                val beforeOpening = app.prefs.all.toMap()
+                openCompletedResult()
+                navigate(Screen.HISTORY)
+                openHistoryRecord(first.session.id)
+                assertEquals(first, selectedHistoryRecord)
+                assertEquals(beforeOpening, app.prefs.all)
+            }
+        }
+        ui.setContent {
+            LaunchedEffect(restored) {
+                while (true) {
+                    restored.receiveVehicle(parked())
+                    delay(200)
+                }
+            }
+            H1App(restored)
+        }
+        ui.onNodeWithText("+100 M", useUnmergedTree = true).assertIsDisplayed()
+        ui.runOnIdle { restored.navigate(Screen.WALLET) }
+        ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
+        ui.onNodeWithText("100", useUnmergedTree = true).assertIsDisplayed()
+        captureDownstream("mileage-100")
+        ui.runOnIdle { restored.navigate(Screen.BADGES) }
+        val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
+        ui.onNode(hasText("안전운전") and filter).performClick()
+        val badge = hasText("정교한 운전") and hasText("1 / 5일")
+        ui.onNode(hasScrollToIndexAction()).performScrollToNode(badge)
+        ui.onNode(badge).assertIsDisplayed()
+        captureDownstream("safety-badge-progress")
+
+        val badges = ui.runOnIdle { restored.ownedBadges.toSet() }
+        ui.runOnIdle {
+            val now = Instant.now()
+            restored.accept(ChallengeRound("같은 목적지 재검증", now.minusSeconds(60), now.plusSeconds(600)))
+            restored.runDemo()
+        }
+        ui.waitUntil(40_000) { restored.phase == Phase.FINISHED && !restored.demoRunning }
+        ui.runOnIdle {
+            assertEquals(95, restored.report!!.score)
+            assertEquals(100, restored.ranking.single { it.id == "나" }.miles)
+            assertEquals("Same destination on the same day cannot pay twice", 0, restored.earned)
+            assertEquals(100, restored.balance)
+            assertEquals(1, restored.collectionProgress.scoreDays(95))
+            assertEquals(1, restored.rankBadgeProgress.days(RankBadgeGoal.FIRST_RANK))
+            assertEquals(badges, restored.ownedBadges)
+            assertTrue(restored.pendingBadges.isEmpty())
+            val records = CompletedDriveStore(app.prefs).readAll()
+            assertEquals(3, records.size)
+            assertEquals(first, records.single { it.session.id == first.session.id })
+            assertEquals(legacy, records.single { it.session.id == legacy.session.id })
+            assertEquals(0, records.single { it.session.id == restored.session!!.id }.earned)
+            stores.last().clear()
+            val reopened = model(app).apply { receiveVehicle(parked()); openCompletedResult() }
+            assertEquals(100, reopened.balance)
+            assertEquals(0, reopened.earned)
+            assertEquals(records, reopened.completedDrives)
+            assertEquals(restored.collectionProgress, reopened.collectionProgress)
+            assertEquals(restored.rankBadgeProgress, reopened.rankBadgeProgress)
+            assertEquals(productionBefore, production.all)
+        }
+    }
+
+    private fun captureDownstream(name: String) {
+        val image = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        java.io.File(ui.activity.filesDir, "scoring-downstream-$name.png").outputStream().use {
+            image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        image.recycle()
+    }
+
     private data class Recording(val route: LiveVehicle, val startedAt: Long, val round: ChallengeRound)
 
     private fun beginLiveTrip(vm: ChallengeViewModel): Recording {

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -35,6 +36,7 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
 import java.util.UUID
+import kotlinx.coroutines.delay
 import kotlin.math.min
 
 class DriveHistoryPersistenceTest {
@@ -289,7 +291,15 @@ class DriveHistoryPersistenceTest {
         CompletedDriveStore(app.prefs).save(saved)
         val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
         val originalPreferences = app.prefs.all.toMap()
-        ui.setContent { MinimumHistoryFrame(vm) }
+        ui.setContent {
+            LaunchedEffect(vm) {
+                while (true) {
+                    vm.receiveVehicle(parkedVehicle())
+                    delay(200)
+                }
+            }
+            MinimumHistoryFrame(vm)
+        }
 
         ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
         ui.onNodeWithText("오래된순").performClick()
@@ -297,7 +307,7 @@ class DriveHistoryPersistenceTest {
         assertSavedOverviewVisibleWithoutScrolling()
         ui.onNodeWithText("+0 M").assertIsDisplayed()
         ui.onNodeWithText("+80 M").assertDoesNotExist()
-        ui.onNodeWithText("공동 1위").assertIsDisplayed()
+        ui.onNode(hasText("공동 1위") and hasAnyAncestor(hasTestTag("saved-rank-나")), useUnmergedTree = true).assertIsDisplayed()
         ui.onNodeWithText("9분 0초", substring = true).assertDoesNotExist()
 
         ui.onNodeWithText("피드백 전체보기").performClick()

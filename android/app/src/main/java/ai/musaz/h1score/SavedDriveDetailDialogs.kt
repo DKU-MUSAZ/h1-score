@@ -85,17 +85,17 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
     val feedback = remember(report) { historyFeedback(report) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         feedback.metrics.forEach { metric ->
-            Surface(Modifier.weight(1f), color = H1Style.PaleMint, shape = RoundedCornerShape(14.dp)) {
+            Surface(Modifier.weight(1f), color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(metric.label, fontSize = 14.sp, color = H1Style.Muted)
+                    Text(metric.label, fontSize = 14.sp, color = H1Style.Ink)
                     Text(metric.value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
                     Text(metric.detail, fontSize = 12.sp, lineHeight = 18.sp, color = H1Style.Muted)
                 }
             }
         }
     }
-    SavedDetailPoints("이어갈 습관", feedback.goodPoints)
-    SavedDetailPoints("개선할 점", feedback.improvements)
+    SavedDetailPoints("이어갈 습관", feedback.goodPoints, SavedDriveDetailStyle.Good)
+    SavedDetailPoints("개선할 점", feedback.improvements, SavedDriveDetailStyle.Improve)
     Surface(color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("기록과 점수 안내", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
@@ -132,9 +132,9 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
     }
 }
 
-@Composable private fun SavedDetailPoints(title: String, points: List<String>) {
+@Composable private fun SavedDetailPoints(title: String, points: List<String>, accent: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+        Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = accent)
         points.forEach { point ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("•", fontSize = 15.sp, lineHeight = 24.sp, color = H1Style.Ink)
@@ -153,8 +153,9 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
         Text("저장된 주행 구간 정보가 없어요.", fontSize = 16.sp, color = H1Style.Ink)
     }
     events.forEachIndexed { index, event ->
+        val accent = event.type.detailColor()
         Column(
-            Modifier.fillMaxWidth().background(H1Style.Paper, RoundedCornerShape(14.dp)).padding(16.dp),
+            Modifier.fillMaxWidth().background(accent.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             val label = when (event.type) {
@@ -162,7 +163,7 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
                 DrivingEventType.RAPID_ACCELERATION -> "급가속"
                 DrivingEventType.RAPID_DECELERATION -> decelerationEventLabel(drive.report)
             }
-            Text("${index + 1}. $label", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Text("${index + 1}. $label", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accent)
             Text("${event.elapsedMs / 60000}분 ${(event.elapsedMs / 1000) % 60}초 · 약 ${String.format(Locale.KOREA, "%.1f", event.distanceM / 1000)} km 부근",
                 fontSize = 14.sp, color = H1Style.Muted)
             Text(when (event.type) {
