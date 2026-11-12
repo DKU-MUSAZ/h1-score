@@ -67,7 +67,7 @@ class DriveCompletionSystemTest {
         val manager = app.getSystemService(NotificationManager::class.java)
         val route = LiveVehicle(destination="알림 검증 · 여의도", destinationId="notification-test",
             destinationPoint=hangangVenue, remainingM=900.0, destinationAt=SystemClock.elapsedRealtime(),
-            speedMps=0.0, speedAt=Long.MAX_VALUE, gearPark=true, uxRestricted=false, belt=true)
+            speedMps=0.0, speedAt=SystemClock.elapsedRealtime(), gearPark=true, uxRestricted=false, belt=true, beltAt=SystemClock.elapsedRealtime())
         main {
             vm.connection.stop()
             vm.receiveVehicle(route)

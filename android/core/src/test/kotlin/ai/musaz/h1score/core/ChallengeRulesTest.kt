@@ -40,33 +40,10 @@ class ChallengeRulesTest {
         assertNull(report.score)
         assertFalse(report.valid)
     }
-    @Test fun `braking never incurs an acceleration penalty`() {
-        val report = ScoreEngine.evaluate(listOf(Sample(0, 20.0, 80), Sample(1000, 10.0, 80)))
-        assertEquals(100.0, report.smoothness)
-    }
-    @Test fun `feedback records event starts and braking does not deduct points`() {
-        val report=ScoreEngine.evaluate(listOf(
-            Sample(0,10.0,50),Sample(1000,20.0,50),Sample(2000,21.0,50),
-            Sample(3000,10.0,50),Sample(4000,9.0,50),
-        ))
-        assertEquals(listOf(DrivingEventType.OVERSPEED,DrivingEventType.RAPID_ACCELERATION,
-            DrivingEventType.RAPID_DECELERATION),report.events.map {it.type})
-        assertEquals(1000L,report.events.first().elapsedMs)
-        assertEquals(15.0,report.events.first().distanceM)
-        assertEquals(1,report.accelerationEvents)
-        val braking=ScoreEngine.evaluate(listOf(Sample(0,20.0,80),Sample(1000,10.0,80)))
-        assertEquals(100.0,braking.smoothness)
-        assertEquals(100.0,braking.compliance)
-        assertEquals(DrivingEventType.RAPID_DECELERATION,braking.events.single().type)
-    }
-    @Test fun `invalid gaps do not create driving feedback`() {
-        val report=ScoreEngine.evaluate(listOf(Sample(0,0.0,50),Sample(10000,30.0,50)))
-        assertTrue(report.events.isEmpty())
-    }
-    @Test fun `feedback list is bounded without changing penalty totals`() {
-        val report=ScoreEngine.evaluate((0..1000).map {Sample(it*1000L,if(it%2==0) 10.0 else 20.0,50)})
-        assertEquals(100,report.events.size)
-        assertEquals(500,report.accelerationEvents)
+    @Test fun `rapid braking excludes smooth driving bonus`() {
+        val report = ScoreEngine.evaluate(SpeedTrace(initialSpeedMps = 20.0, limitKph = 80).drive(1000, -10.0).samples)
+        assertEquals(0.0, report.smoothness)
+        assertEquals(1, report.brakingEvents)
     }
     @Test fun `tied first shares two slots and third keeps own slot`() {
         val ranked = Settlement.rank(listOf(Entry("a",96),Entry("b",96),Entry("c",90),Entry("d",88),Entry("e",86)))
@@ -106,16 +83,16 @@ class ChallengeRulesTest {
         assertEquals(100, ledger.credit("5",100,"a","2026-11-06"))
     }
     @Test fun `missing intervals reduce coverage and invalidate ranking`() {
-        val report=ScoreEngine.evaluate(listOf(Sample(0,20.0,80),Sample(1000,20.0,80),Sample(20000,20.0,80)))
+        val report=ScoreEngine.evaluate((0..10).map { Sample(it * 100L, 20.0, 80) } + Sample(20000, 20.0, 80))
         assertEquals(.05,report.coverage,.0001)
         assertFalse(report.valid)
         assertNull(report.score)
     }
     @Test fun `personal score needs distance but not ranking distance`() {
-        val short=ScoreEngine.evaluate((0..20).map { Sample(it*1000L,20.0,80) })
+        val short=ScoreEngine.evaluate((0..200).map { Sample(it*100L,20.0,80) })
         assertNull(short.score)
-        val personal=ScoreEngine.evaluate((0..60).map { Sample(it*1000L,20.0,80) })
-        assertEquals(100,personal.score)
+        val personal=ScoreEngine.evaluate((0..600).map { Sample(it*100L,20.0,80) })
+        assertEquals(65,personal.score)
         assertFalse(personal.valid)
     }
     @Test fun `stopped samples cannot inflate distance weighted compliance`() {
