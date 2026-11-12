@@ -31,13 +31,13 @@ import androidx.compose.ui.unit.sp
     var details by remember(drive.session.id) { mutableStateOf<SavedDriveDetailSection?>(null) }
     val feedback = remember(drive.report) { historyFeedback(drive.report) }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "기록 목록으로", tint = H1Style.Ink) }
             Column(Modifier.weight(1f).padding(start = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(drive.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink,
+                Text(drive.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${historyDateLabel(drive.completedAtEpochMs)} · 분석 거리 ${"%.1f".format(drive.report.validDistanceM / 1000)} km · ${if (drive.demo) "시연 기록" else "SDK 기록"}",
-                    fontSize = 12.sp, color = H1Style.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    fontSize = 12.sp, lineHeight = 16.sp, color = H1Style.Muted)
             }
             Text(if (drive.report.score == null) "점수 미확정" else if (drive.missedDeadline) "마감 이후 도착" else "기록 확인 완료",
                 fontSize = 12.sp, color = H1Style.Ink, modifier = Modifier.padding(start = 12.dp))
