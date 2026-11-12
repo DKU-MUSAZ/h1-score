@@ -17,3 +17,15 @@ KAKAO_NATIVE_APP_KEY=
 - [카카오맵 Android SDK 시작하기](https://apis.map.kakao.com/android_v2/docs/getting-started/quickstart/)
 - [Pleos Connect Virtual Console](https://document.pleos.ai/docs/connect/guide/getting-started/application-development/use-vehicle-emulator)
 - [팀 Notion · 카카오맵 키](https://app.notion.com/p/41031a203ed3807a880de56724c6e9f3)
+
+### 챌린지 목적지 검색
+
+앱에서 일반 장소를 검색하려면 내부 검증용 Debug 빌드의 `android/local.properties`에
+`KAKAO_LOCAL_REST_API_KEY`를 설정하세요. Kakao Developers에서 카카오맵 API가 활성화된
+앱의 REST API 키를 사용합니다. 지도 표시에는 기존 `KAKAO_NATIVE_APP_KEY`를 사용합니다.
+키를 넣어 빌드한 Debug APK에는 키가 포함되므로 내부 테스트에 사용하세요. 배포 환경의
+일반 장소 검색은 서버에서 키를 관리하는 연동이 필요합니다.
+
+키 없이 더현대 서울과 서울역으로 참가 및 일반 길 안내 팝업을 확인할 수 있어요.
+앱에서 좌표를 확인하지 못한 장소는 내장 내비 검색으로 이어집니다.
+[카카오 Local 키워드 장소 검색](https://developers.kakao.com/docs/ko/kakaomap/rest-api#search-by-keyword)

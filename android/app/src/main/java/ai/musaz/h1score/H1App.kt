@@ -6,6 +6,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
@@ -34,6 +36,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Dialog
@@ -61,13 +64,13 @@ private val Gold=H1Style.Gold
             val compact = maxWidth < maxHeight * 1.25f
             if (compact && (!vm.parked || vm.screen in listOf(Screen.HOME, Screen.JOURNEY))) {
                 CompactNavigationPanel(vm)
-                return@BoxWithConstraints
-            }
-            val current=LocalDensity.current
-            val scale=min(maxWidth.value/1180f,maxHeight.value/680f)
-            val frameHeight=(maxHeight/scale).coerceAtMost(800.dp)
-            CompositionLocalProvider(LocalDensity provides Density(current.density*scale,current.fontScale)) {
-                AppFrame(vm, Modifier.requiredSize(1180.dp,frameHeight))
+            } else {
+                val current=LocalDensity.current
+                val scale=min(maxWidth.value/1180f,maxHeight.value/680f)
+                val frameHeight=(maxHeight/scale).coerceAtMost(800.dp)
+                CompositionLocalProvider(LocalDensity provides Density(current.density*scale,current.fontScale)) {
+                    AppFrame(vm, Modifier.requiredSize(1180.dp,frameHeight))
+                }
             }
         }
     }
@@ -100,16 +103,6 @@ private val Gold=H1Style.Gold
                 vm.demo && vm.activeJourney -> Button(onClick=vm::runDemo) { Text("시연 주행 재생") }
                 !vm.activeJourney && !vm.demo && vm.hasLiveRoute && vm.currentNavigationPlace != null && !vm.destinationInChallengeGroup -> {
                     Button(onClick=vm::continueWithoutChallenge) { Text("일반 내비로 계속") }
-                }
-                !vm.activeJourney && !vm.demo && vm.hasLiveRoute -> {
-                    var invite by remember { mutableStateOf(false) }
-                    Button(onClick={invite=true}) { Text("참가 예약") }
-                    if (invite) Modal("이번 드라이브 참가", vm.destinationName, { invite=false }) {
-                        RoundConsent(vm, "참가 예약", vm.destinationInChallengeGroup && vm.live.beltConditionMet) {
-                            invite=false
-                            vm.accept(it)
-                        }
-                    }
                 }
                 !vm.activeJourney -> TextButton(onClick=vm::openBuiltInNavigation) { Text("내장 내비에서 검색",color=Mint) }
             }
@@ -288,10 +281,66 @@ private val Gold=H1Style.Gold
     }
 }
 
+@Composable
+internal fun NavigationSearchDialog(
+    keyword: String,
+    onDismiss: () -> Unit,
+    onSearch: () -> Unit,
+    placeResolved: Boolean = false,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color.White,
+        titleContentColor = Ink,
+        textContentColor = Muted,
+        title = {
+            Text(if (placeResolved) "일반 길 안내를 시작할까요?" else "내장 내비에서 검색할까요?", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Text(if (placeResolved) "‘$keyword’에서 1km 안에 챌린지 개최지가 없어요. 내장 내비에서 이 목적지로 안내할게요."
+                else "앱에서 ‘$keyword’의 좌표를 확인하지 못했어요. 내장 내비에서 장소를 선택하면 목적지 주변 챌린지를 확인할 수 있어요.")
+        },
+        confirmButton = {
+            Button(
+                onClick = onSearch,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+            ) { Text(if (placeResolved) "내비 시작" else "내비에서 검색") }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Ink),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink)
+            ) { Text("검색 계속") }
+        }
+    )
+}
+
+@Composable
+internal fun LiveRouteChallengeDialog(
+    vm: ChallengeViewModel,
+    destinationName: String,
+    venueName: String,
+    onDismiss: () -> Unit,
+) {
+    Modal("$venueName 대회 참가", "내비 목적지 · $destinationName", onDismiss) {
+        Text("현재 목적지로 길 안내를 계속하면서 이 챌린지에 참가해요.", color = Muted)
+        if (!vm.live.beltConditionMet) Text("운전석 벨트 상태를 확인해 주세요.", color = Muted)
+        RoundConsent(vm, "동의하고 참가", vm.live.beltConditionMet) { round ->
+            vm.accept(round)
+            if (vm.activeJourney) onDismiss()
+        }
+    }
+}
+
 @Composable internal fun ChallengeMap(vm: ChallengeViewModel, modifier: Modifier, initialSpot: Destination? = null) {
     var query by remember { mutableStateOf("") }
     var zoom by remember { mutableFloatStateOf(1f) }
     var confirm by remember { mutableStateOf(false) }
+    var navigationQuery by remember { mutableStateOf<String?>(null) }
     var selectedMapSpot by remember(initialSpot) { mutableStateOf(initialSpot) }
     val application = androidx.compose.ui.platform.LocalContext.current.applicationContext as H1Application
     var showKakao by remember { mutableStateOf(application.kakaoMapEnabled) }
@@ -302,6 +351,12 @@ private val Gold=H1Style.Gold
     val matchingSpots = challengeSpots.filter { query.isBlank() ||
         (it.name + it.area).filter(Char::isLetterOrDigit).contains(key, ignoreCase = true) }
     val matches = matchingSpots.isNotEmpty()
+    fun confirmNavigationSearch() {
+        if (canJoin && query.isNotBlank() && !matches) {
+            focus.clearFocus()
+            navigationQuery = query.trim()
+        }
+    }
     LaunchedEffect(query) { if (query.isNotBlank() && matchingSpots.size == 1) selectedMapSpot = matchingSpots.single() }
     val now = rememberChallengeTime()
     val deadlineLabel = ChallengeRound.currentOrNext(now).closingLabel + " 마감"
@@ -318,6 +373,8 @@ private val Gold=H1Style.Gold
                 Tag(if(showKakao) "카카오맵" else "장소 목록",Color.White,Muted)
             }
             OutlinedTextField(query,{query=it},enabled=vm.parked && !vm.activeJourney,singleLine=true,
+                keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),
+                keyboardActions=KeyboardActions(onSearch={confirmNavigationSearch()}),
                 leadingIcon={Icon(Icons.Outlined.Search,null)},
                 trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}) { Icon(Icons.Outlined.Close,"검색어 지우기") }},
                 placeholder={Text("챌린지 장소 검색")},shape=RoundedCornerShape(28.dp),
@@ -340,36 +397,53 @@ private val Gold=H1Style.Gold
         if (!showKakao && matches) Column(Modifier.align(Alignment.Center).padding(top=90.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text("지도를 불러오지 못했어요 · 장소 목록", color=Ink)
             matchingSpots.forEach { spot ->
-                OutlinedButton(onClick={selectedMapSpot=spot;confirm=true}, enabled=canJoin) {
+                OutlinedButton(
+                    onClick = { selectedMapSpot = spot; confirm = true },
+                    enabled = canJoin,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (spot == selectedMapSpot) PaleMint else Color.Transparent
+                    )
+                ) {
                     Text("${spot.name} · 참가 예시 ${spot.demoPeers}명")
                 }
             }
         }
         if (!matches) Surface(Modifier.align(Alignment.Center).padding(top=55.dp),shape=RoundedCornerShape(20.dp),color=Color.White) {
             Column(Modifier.widthIn(max=360.dp).padding(18.dp)) {
-                Text("검색과 일치하는 챌린지가 없어요",color=Ink,fontWeight=FontWeight.Bold)
-                Text("내장 내비에서 장소를 선택하고 길 안내를 시작할 수 있어요.",
-                    color=Muted,fontSize=13.sp,modifier=Modifier.padding(top=6.dp,bottom=14.dp))
-                Primary("내비에서 검색",enabled=vm.parked && !vm.activeJourney && !vm.awaitingMapRoute) {
-                    focus.clearFocus()
-                    vm.searchDestination(query)
-                }
+                Text("챌린지 지도에서 찾지 못했어요", color=Ink, fontWeight=FontWeight.Bold)
+                Text("장소를 검색해 목적지 주변 챌린지를 확인할 수 있어요.",
+                    color=Muted, fontSize=13.sp, modifier=Modifier.padding(top=6.dp,bottom=14.dp))
+                Primary("목적지 검색", enabled = canJoin, action = ::confirmNavigationSearch)
             }
         }
         Text("마커를 눌러 챌린지 참가",fontSize=12.sp,color=Ink,
             modifier=Modifier.align(Alignment.BottomStart).padding(20.dp))
     }
-    LaunchedEffect(vm.parked) { if(!vm.parked) confirm=false }
+    LaunchedEffect(canJoin) {
+        if (!canJoin) {
+            confirm = false
+            navigationQuery = null
+        }
+    }
+    if (canJoin) navigationQuery?.let { keyword ->
+        DestinationSearchDialog(vm, keyword) { navigationQuery = null }
+    }
     if (confirm && vm.parked) selectedMapSpot?.let { spot ->
         ChallengeEntryDialog(vm, spot) { confirm=false }
     }
 }
 
-@Composable internal fun ChallengeEntryDialog(vm: ChallengeViewModel, destination: Destination, onDismiss: () -> Unit) {
+@Composable internal fun ChallengeEntryDialog(
+    vm: ChallengeViewModel,
+    destination: Destination,
+    place: ai.musaz.h1score.core.SavedPlace? = null,
+    onDismiss: () -> Unit,
+) {
     val isHangang = destination == hangangChallenge
     val title = if (isHangang) "여의도 한강공원" else destination.name
     Modal("이 목적지로 챌린지에 참가할까요?", "$title · 참가 예시 ${destination.demoPeers}명", onDismiss) {
-        Text(if (vm.demo && !isHangang) "예약 후 ‘시연 주행 재생’을 누르면 가상 주행이 시작돼요. 도착 후 결과를 볼 수 있어요."
+        if (place != null) Text("내비 목적지 · ${place.name}", color=Ink, fontWeight=FontWeight.SemiBold)
+        Text(if (vm.demo && !isHangang && place == null) "예약 후 ‘시연 주행 재생’을 누르면 가상 주행이 시작돼요. 도착 후 결과를 볼 수 있어요."
             else "길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
             color=Muted,modifier=Modifier.padding(bottom=18.dp))
         val beltRequired = !vm.demo && !vm.live.beltConditionMet
@@ -380,25 +454,30 @@ private val Gold=H1Style.Gold
             Spacer(Modifier.height(12.dp))
         }
         if (beltRequired) {
-            OutlinedButton(onClick={onDismiss();vm.navigateToChallengeWithoutJoining(destination)},modifier=Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick={
+                onDismiss()
+                if (place != null) vm.navigateToPlace(place) else vm.navigateToChallengeWithoutJoining(destination)
+            },modifier=Modifier.fillMaxWidth()) {
                 Text("길 안내만 열기")
             }
             Spacer(Modifier.height(8.dp))
         }
-        if (!vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired) {
+        val canKeepRoute = place == null && !vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired
+        if (canKeepRoute) {
             Text("현재 목적지는 ${vm.matchedVenue?.name} 대회에 배정돼요.", color=Green)
         }
         val action = when {
             !vm.demo -> "동의하고 내비 시작"
-            isHangang -> "참가 예약 · 내비 시작"
+            isHangang || place != null -> "참가 예약 · 내비 시작"
             else -> "시연 참가 예약"
         }
         RoundConsent(vm, action, !beltRequired,
-            if (!vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired) {
+            if (canKeepRoute) {
                 { round -> onDismiss(); vm.accept(round) }
             } else null) {
             onDismiss()
-            vm.joinMapChallenge(it, destination)
+            if (place == null) vm.joinMapChallenge(it, destination)
+            else vm.joinDestinationChallenge(it, destination, place)
         }
     }
 }
@@ -536,7 +615,7 @@ private val Gold=H1Style.Gold
             }
         }
         ResultRanking(vm,saved)
-        if(vm.pendingBadges.isNotEmpty()) {
+        if(saved==null && vm.pendingBadges.isNotEmpty()) {
             Surface(onClick=onBadge,color=Color(0xFFFFF3D9),shape=RoundedCornerShape(16.dp),modifier=Modifier.fillMaxWidth().padding(top=12.dp)) {
                 Row(Modifier.padding(horizontal=18.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
                     Icon(Icons.Outlined.WorkspacePremium,null,tint=Gold,modifier=Modifier.size(25.dp))
@@ -678,15 +757,31 @@ private val Gold=H1Style.Gold
                     }
                     records.forEach { record ->
                         key(record.session.id) {
-                            Surface(onClick={vm.openHistoryRecord(record.session.id)},color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth().padding(bottom=20.dp)) {
-                                Row(Modifier.padding(28.dp),verticalAlignment=Alignment.CenterVertically) {
-                                    Box(Modifier.size(60.dp).background(PaleMint,RoundedCornerShape(18.dp)),contentAlignment=Alignment.Center) { Icon(Icons.Outlined.Route,null,tint=Green) }
-                                    Column(Modifier.weight(1f).padding(start=20.dp)) {
-                                        Text(record.name,fontSize=24.sp,fontWeight=FontWeight.Bold)
-                                        Text(historyDateLabel(record.completedAtEpochMs),color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=8.dp))
-                                        Text("유효 거리 ${"%.1f".format(record.report.validDistanceM/1000)} km  ·  ${if(record.demo) "시연 기록" else "SDK 기록"}",color=Muted,fontSize=14.sp,modifier=Modifier.padding(top=4.dp))
+                            Surface(
+                                onClick = { vm.openHistoryRecord(record.session.id) },
+                                color = Color.White, shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                ) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text(record.name, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                        Text(historyDateLabel(record.completedAtEpochMs), color = Muted, fontSize = 13.sp)
+                                        Text("${"%.1f".format(record.report.validDistanceM / 1000)} km  /  ${if (record.demo) "시연" else "차량 기록"}",
+                                            color = Muted, fontSize = 13.sp)
                                     }
-                                    Text("${record.report.score ?: "—"}",fontSize=40.sp,color=Green);Text(" 점",color=Muted);Icon(Icons.Outlined.ChevronRight,null,Modifier.padding(start=28.dp))
+                                    Surface(color = PaleMint, shape = RoundedCornerShape(12.dp)) {
+                                        Box(Modifier.widthIn(min = 72.dp).padding(horizontal = 10.dp, vertical = 9.dp),
+                                            contentAlignment = Alignment.Center) {
+                                            Text(record.report.score?.let { "${it}점" } ?: "미확정",
+                                                fontSize = 20.sp, color = Ink, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Icon(Icons.Outlined.ChevronRight, null, tint = Muted)
                                 }
                             }
                         }
@@ -734,7 +829,9 @@ private val Gold=H1Style.Gold
     },modifier=modifier,contentScale=ContentScale.Fit)
 }
 
-@Composable internal fun ScoreDial(score:Int?,accent:Color,modifier:Modifier) {
+@Composable internal fun ScoreDial(
+    score: Int?, accent: Color, modifier: Modifier, numberSize: TextUnit = 50.sp, pendingLabel: String = "평가 대기",
+) {
     val target=(score ?: 0)/100f
     val progress by animateFloatAsState(target,tween(700),label="result-score")
     Box(modifier.semantics {contentDescription="주행습관 점수 원"},contentAlignment=Alignment.Center) {
@@ -746,8 +843,8 @@ private val Gold=H1Style.Gold
             if(score!=null) drawArc(accent,135f,270f*progress,false,topLeft=origin,size=circle,style=Stroke(8.dp.toPx(),cap=StrokeCap.Round))
         }
         Column(horizontalAlignment=Alignment.CenterHorizontally) {
-            Text(score?.toString() ?: "—",fontSize=50.sp,fontWeight=FontWeight.Bold,letterSpacing=(-2).sp)
-            Text(if(score==null) "평가 대기" else "100점 만점",fontSize=12.sp,color=Muted)
+            Text(score?.toString() ?: "—",fontSize=numberSize,fontWeight=FontWeight.Bold,letterSpacing=(-2).sp)
+            Text(if(score==null) pendingLabel else "100점 만점",fontSize=14.sp,color=Muted)
         }
     }
 }
@@ -843,7 +940,7 @@ private val Gold=H1Style.Gold
         }
     }
 }
-@Composable private fun Modal(title:String,subtitle:String,dismiss:()->Unit,body:@Composable ColumnScope.()->Unit) {
+@Composable internal fun Modal(title:String,subtitle:String,dismiss:()->Unit,body:@Composable ColumnScope.()->Unit) {
     Dialog(onDismissRequest=dismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
         Surface(Modifier.width(620.dp).heightIn(max=640.dp),shape=RoundedCornerShape(28.dp),color=Color.White) {
             Column(Modifier.padding(30.dp).verticalScroll(rememberScrollState())) {

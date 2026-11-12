@@ -42,35 +42,37 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
 ) {
     val frameDensity = LocalDensity.current
     val title = when (section) {
-        SavedDriveDetailSection.FEEDBACK -> "주행 피드백 전체보기"
+        SavedDriveDetailSection.FEEDBACK -> "운전점수 산정 내역"
         SavedDriveDetailSection.EVENTS -> "저장된 주행 구간"
-        SavedDriveDetailSection.RANKING -> "함께 도착한 무사즈"
+        SavedDriveDetailSection.RANKING -> "참가자 순위"
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         CompositionLocalProvider(LocalDensity provides frameDensity) {
-            Surface(
-                Modifier.widthIn(max = 860.dp).fillMaxWidth(.9f).fillMaxHeight(.88f),
-                color = Color.White, shape = RoundedCornerShape(24.dp),
-            ) {
-                Column(Modifier.padding(24.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, Modifier.weight(1f).semantics { heading() },
-                            fontSize = 24.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Outlined.Close, "닫기", tint = H1Style.Ink)
+            BoxWithConstraints(contentAlignment = Alignment.Center) {
+                Surface(
+                    Modifier.widthIn(max = 860.dp).fillMaxWidth(.9f).heightIn(max = maxHeight * .88f),
+                    color = Color.White, shape = RoundedCornerShape(24.dp),
+                ) {
+                    Column(Modifier.padding(24.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(title, Modifier.weight(1f).semantics { heading() },
+                                fontSize = 24.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+                            IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Outlined.Close, "닫기", tint = H1Style.Ink)
+                            }
                         }
-                    }
-                    Text(drive.name, fontSize = 14.sp, color = H1Style.Muted)
-                    HorizontalDivider(Modifier.padding(vertical = 16.dp), color = H1Style.Line)
-                    key(drive.session.id, section) {
-                        Column(
-                            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                        ) {
-                            when (section) {
-                                SavedDriveDetailSection.FEEDBACK -> SavedFeedbackDetails(drive)
-                                SavedDriveDetailSection.EVENTS -> SavedEventDetails(drive)
-                                SavedDriveDetailSection.RANKING -> SavedRankingDetails(drive)
+                        Text(drive.name, fontSize = 14.sp, color = H1Style.Muted)
+                        HorizontalDivider(Modifier.padding(vertical = 16.dp), color = H1Style.Line)
+                        key(drive.session.id, section) {
+                            Column(
+                                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                when (section) {
+                                    SavedDriveDetailSection.FEEDBACK -> SavedFeedbackDetails(drive)
+                                    SavedDriveDetailSection.EVENTS -> SavedEventDetails(drive)
+                                    SavedDriveDetailSection.RANKING -> SavedRankingDetails(drive)
+                                }
                             }
                         }
                     }
@@ -83,19 +85,19 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
 @Composable private fun SavedFeedbackDetails(drive: CompletedDrive) {
     val report = drive.report
     val feedback = remember(report) { historyFeedback(report) }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        feedback.metrics.forEach { metric ->
-            Surface(Modifier.weight(1f), color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(metric.label, fontSize = 14.sp, color = H1Style.Ink)
-                    Text(metric.value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-                    Text(metric.detail, fontSize = 12.sp, lineHeight = 18.sp, color = H1Style.Muted)
+    if (!report.usesDistanceBonus) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            feedback.metrics.forEach { metric ->
+                Surface(Modifier.weight(1f), color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(metric.label, fontSize = 14.sp, color = H1Style.Ink)
+                        Text(metric.value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+                        Text(metric.detail, fontSize = 12.sp, lineHeight = 18.sp, color = H1Style.Muted)
+                    }
                 }
             }
         }
     }
-    SavedDetailPoints("이어갈 습관", feedback.goodPoints, SavedDriveDetailStyle.Good)
-    SavedDetailPoints("개선할 점", feedback.improvements, SavedDriveDetailStyle.Improve)
     Surface(color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("기록과 점수 안내", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
@@ -104,9 +106,16 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
             Text(scoreFormula(report),
                 fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Ink)
             if (report.usesDistanceBonus) {
-                Text("속도 +${scorePoints(report.speedPoints)}점 · 가감속 +${scorePoints(report.accelerationPoints)}점 · 회전 −${scorePoints(report.turnPenalty)}점",
-                    fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Ink)
-                Text("가점은 소수 둘째 자리까지 표시해요. 최종 점수는 원래 가점의 합계를 반올림한 값이에요.",
+                val unused = report.turns.count { it.verdict == TurnVerdict.UNUSED }
+                val opposite = report.turns.count { it.verdict == TurnVerdict.MISMATCHED }
+                SavedDetailPoints("가점", listOf(
+                    "속도 +${scorePoints(report.speedPoints)}점 · 제한속도 이하로 달린 거리",
+                    "가감속 +${scorePoints(report.accelerationPoints)}점 · 제한속도를 지키고 급가감속 없이 달린 거리",
+                ), SavedDriveDetailStyle.Good)
+                SavedDetailPoints("감점", listOf(
+                    "회전 −${scorePoints(report.turnPenalty)}점 · 방향지시등 미사용 ${unused}건, 반대 방향 ${opposite}건",
+                ), SavedDriveDetailStyle.Improve)
+                Text("가점은 소수 둘째 자리까지 표시해요. 최종 점수는 기본 점수에 가점을 더하고 감점을 뺀 뒤 반올림해요. 100점은 모든 배점을 채웠을 때만 받을 수 있어요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
                 Text("가감속 자료 확보율 ${(report.longitudinalCoverage * 100).roundToInt()}% · 유효 수신 빈도 ${scorePoints(report.longitudinalSampleRateHz)} Hz",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
@@ -179,10 +188,10 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
     val ranking = drive.ranking
     val own = ranking.firstOrNull { it.id == "나" }
     val comparison = when {
-        !drive.demo -> "실제 서버 매칭은 준비 중이에요. 이번 주행은 개인 기록으로 확인해요."
+        !drive.demo -> "이 주행은 개인 기록이에요. 비교할 참가자 순위가 없어요."
         drive.missedDeadline -> "마감 이후에 도착해 개인 기록만 표시해요."
         ranking.isEmpty() -> "순위에 필요한 거리·데이터 조건을 채우지 못했어요."
-        else -> "시연 비교조 ${ranking.size}명 · 같은 회차 · 챌린지 반경 1km"
+        else -> "같은 회차 시연 기록 · 참가자 ${ranking.size}명"
     }
     Text(comparison, fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
     if (ranking.isNotEmpty()) {

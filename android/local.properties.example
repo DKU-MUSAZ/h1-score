@@ -2,3 +2,6 @@
 sdk.dir=/absolute/path/to/Android/sdk
 # Fill in locally with the Kakao Developers native app key for this Android app.
 KAKAO_NATIVE_APP_KEY=
+
+# Optional for Kakao Local keyword search in internal debug builds.
+KAKAO_LOCAL_REST_API_KEY=

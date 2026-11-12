@@ -2,7 +2,6 @@ package ai.musaz.h1score
 
 import ai.musaz.h1score.core.ChallengeRound
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -41,17 +41,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 import java.util.Locale
 
+private val challengeBackground = Brush.horizontalGradient(listOf(Color(0xFFE9EFE5), Color(0xFFE7EFF2)))
 internal val popularSpots get() = popularChallengeSpots(challengeSpots)
 internal fun popularChallengeSpots(spots: List<Destination>) = spots.filter { it.demoPeers >= 10 }
     .sortedWith(compareByDescending<Destination> { it.demoPeers }.thenBy { it.name })
     .take(3)
-private val HomeStatDiameter = 216.dp
 
 @Composable
 internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
@@ -64,6 +63,7 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val canChoose = vm.canChooseDestination
+    var navigationQuery by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun hideKeyboard() {
         keyboard?.hide()
@@ -93,7 +93,6 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     fun chooseSpot(spot: Destination) {
         if (!canChoose) return
         hideKeyboard()
-        vm.rememberDestination(spot.name)
         mapSpot = spot
         showMap = true
     }
@@ -101,16 +100,25 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     fun searchDestination(name: String) {
         if (!canChoose || name.isBlank()) return
         val key = name.filter(Char::isLetterOrDigit)
-        val spot = popularSpots.singleOrNull {
+        val spot = challengeSpots.singleOrNull {
             val spotKey = it.name.filter(Char::isLetterOrDigit)
             spotKey.equals(key, ignoreCase = true) ||
                 (vm.demo && key.length >= 2 && spotKey.startsWith(key, ignoreCase = true))
         }
         if (spot != null) {
+            vm.rememberDestination(spot.name)
             chooseSpot(spot)
         } else {
-            closeSearch()
-            vm.searchDestination(name)
+            hideKeyboard()
+            navigationQuery = name.trim()
+        }
+    }
+
+    if (!showMap && !searching && !editingShortcuts && navigationQuery == null) {
+        vm.routeInvitationVenue?.let { venue ->
+            key(vm.live.destinationId) {
+                LiveRouteChallengeDialog(vm, vm.live.destination.orEmpty(), venue.name, vm::dismissRouteInvitation)
+            }
         }
     }
 
@@ -118,16 +126,18 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
         if (showMap) showMap = false else closeSearch()
     }
     LaunchedEffect(canChoose) {
-        if (!canChoose) editingShortcuts = false
+        if (!canChoose) {
+            editingShortcuts = false
+            navigationQuery = null
+        }
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        DestinationCompetitionCard(vm)
         if (showMap) {
             TextButton(onClick = { showMap = false }) { Text("목적지 검색으로 돌아가기") }
             ChallengeMap(
                 vm,
                 Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                    .background(H1Style.heroBackground),
+                    .background(challengeBackground),
                 initialSpot = mapSpot
             )
         } else {
@@ -135,16 +145,16 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it; searching = true },
-                    modifier = Modifier.weight(1f).heightIn(min = 68.dp).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
+                    modifier = Modifier.weight(1f).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
                     enabled = canChoose,
                     singleLine = true,
-                    shape = RoundedCornerShape(34.dp),
-                    placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 21.sp) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(26.dp)) },
+                    shape = RoundedCornerShape(30.dp),
+                    placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 19.sp) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     trailingIcon = if (query.isNotEmpty()) {
                         { IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "검색어 지우기") } }
                     } else null,
-                    textStyle = LocalTextStyle.current.copy(fontSize = 21.sp),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 19.sp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searchDestination(query) }),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -170,22 +180,25 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
             } else {
                 val score = vm.collectionProgress.weeklyScoreAverage(LocalDate.now(ChallengeRound.seoul))
                 Column(
-                    Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                        .background(H1Style.heroBackground).padding(top = 18.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                    Modifier.fillMaxWidth().weight(1f)
+                        .clip(RoundedCornerShape(28.dp)).background(challengeBackground)
+                        .padding(top = 12.dp, bottom = 18.dp),
                 ) {
                     ChallengeHomeHero(vm.recordedDistanceMeters, score, Modifier.weight(1f))
                     Text(
                         if (vm.awaitingMapRoute) "내비 경로를 확인하고 있어요" else vm.homeGreeting,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         color = H1Style.Ink,
-                        fontSize = 28.sp,
+                        fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
         }
+    }
+    if (canChoose) navigationQuery?.let { keyword ->
+        DestinationSearchDialog(vm, keyword) { navigationQuery = null }
     }
     if (searching && editingShortcuts && canChoose) {
         DestinationShortcutEditor(vm, shortcutId) { editingShortcuts = false }
@@ -252,55 +265,50 @@ private fun DestinationShortcutButton(
 private fun ChallengeHomeHero(distanceMeters: Long, score: Int?, modifier: Modifier) {
     val distance = String.format(Locale.KOREA, "%,.1f km", distanceMeters / 1_000.0)
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val imageHeight = (maxHeight - 20.dp).coerceIn(0.dp, 380.dp)
-        val statDiameter = (imageHeight * .62f).coerceIn(144.dp, HomeStatDiameter)
-        val maxStatOffset = ((maxWidth - statDiameter) / 2 - 12.dp).coerceAtLeast(0.dp)
-        // The mascot PNG has transparent side margins: match the visible figure,
-        // with the two circles above its hands, as in the reference layout.
-        val statOffset = (statDiameter / 2 + imageHeight * .30f).coerceAtMost(maxStatOffset)
-        val statTop = (maxHeight - imageHeight - 90.dp).coerceAtLeast(18.dp)
+        val imageHeight = minOf(maxHeight * .80f, maxWidth * .39f)
+        val diameter = minOf(maxHeight * .53f, maxWidth * .21f)
+        val imageBottomPadding = 8.dp
+        // Align each circle’s lower curve with the palm in the fitted mascot image.
+        val palmHeight = imageHeight * .62f
+        val statTop = (maxHeight - imageBottomPadding - palmHeight - diameter + 12.dp)
+            .coerceIn(0.dp, maxHeight - diameter)
+        val statOffset = minOf(imageHeight * .565f, (maxWidth - diameter) / 2)
         ChallengeHomeStat(
             "무사즈와", distance, "달렸어요",
-            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop), statDiameter
+            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop).size(diameter)
         )
         ChallengeHomeStat(
             "이번 주 안전점수", score?.let { "${it}점" } ?: "—",
             if (score == null) "아직 기록이 없어요" else "일별 최고점 평균",
-            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop), statDiameter
+            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop).size(diameter)
         )
         Image(
             painterResource(R.drawable.musaz_challenge_home),
             contentDescription = null,
-            modifier = Modifier.align(Alignment.BottomCenter).offset(y = 8.dp).size(imageHeight * 1.5f, imageHeight),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = imageBottomPadding).size(imageHeight * 1.5f, imageHeight),
             contentScale = ContentScale.Fit
         )
     }
 }
 
 @Composable
-private fun ChallengeHomeStat(title: String, value: String, caption: String, modifier: Modifier, diameter: Dp) {
-    val scale = diameter / HomeStatDiameter
-    Box(modifier.size(diameter)) {
-        Box(Modifier.matchParentSize().offset(x = 6.dp * scale, y = 8.dp * scale)
-            .background(H1Style.Ink.copy(alpha = .12f), CircleShape))
-        Surface(Modifier.fillMaxSize(), shape = CircleShape, color = H1Style.Ink,
-            shadowElevation = 8.dp * scale, border = BorderStroke(1.dp, Color.White.copy(alpha = .18f))) {
-            Column(
-                Modifier.fillMaxSize().padding(horizontal = 30.dp * scale, vertical = 12.dp * scale),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(3.dp * scale, Alignment.CenterVertically)
-            ) {
-                Text(title, color = Color.White, fontSize = 21.sp * scale, fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center)
-                BasicText(
-                    value,
-                    style = LocalTextStyle.current.copy(color = Color.White, fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center),
-                    maxLines = 1,
-                    autoSize = TextAutoSize.StepBased(minFontSize = 16.sp * scale, maxFontSize = 44.sp * scale)
-                )
-                Text(caption, color = Color(0xFFDCE3EC), fontSize = 17.sp * scale, textAlign = TextAlign.Center)
-            }
+private fun ChallengeHomeStat(title: String, value: String, caption: String, modifier: Modifier) {
+    Surface(modifier, shape = CircleShape, color = Color.White.copy(alpha = .65f)) {
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
+        ) {
+            Text(title, color = H1Style.Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center)
+            BasicText(
+                value,
+                style = LocalTextStyle.current.copy(color = H1Style.Ink, fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center),
+                maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 16.sp, maxFontSize = 41.sp)
+            )
+            Text(caption, color = H1Style.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
         }
     }
 }

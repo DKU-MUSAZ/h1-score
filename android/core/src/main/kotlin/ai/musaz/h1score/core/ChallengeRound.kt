@@ -1,7 +1,7 @@
 package ai.musaz.h1score.core
 
+import java.time.DayOfWeek
 import java.time.Instant
-import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.*
@@ -15,16 +15,32 @@ data class ChallengeRound(val name: String, val opensAt: Instant, val closesAt: 
     companion object {
         val seoul: ZoneId = ZoneId.of("Asia/Seoul")
         private val clockFormat = DateTimeFormatter.ofPattern("HH:mm").withZone(seoul)
-        private val slots = listOf(Triple("출근", 6, 9), Triple("점심", 11, 14), Triple("퇴근", 17, 20))
+        private val weekdaySlots = listOf(
+            Triple("새벽", 0, 7),
+            Triple("출근", 7, 10),
+            Triple("주간", 10, 17),
+            Triple("퇴근", 17, 20),
+            Triple("야간", 20, 24),
+        )
+        private val weekendSlots = listOf(
+            Triple("주말 새벽", 0, 8),
+            Triple("주말 주간", 8, 16),
+            Triple("주말 야간", 16, 24),
+        )
 
         fun currentOrNext(now: Instant): ChallengeRound {
-            val today = now.atZone(seoul).toLocalDate()
-            return sequenceOf(today, today.plusDays(1)).flatMap { date ->
-                slots.asSequence().map { (name, start, end) ->
-                    ChallengeRound(name, date.atTime(LocalTime.of(start, 0)).atZone(seoul).toInstant(),
-                        date.atTime(LocalTime.of(end, 0)).atZone(seoul).toInstant())
-                }
-            }.first { now < it.closesAt }
+            val local = now.atZone(seoul)
+            val slots = when (local.dayOfWeek) {
+                DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> weekendSlots
+                else -> weekdaySlots
+            }
+            val (name, start, end) = slots.first { (_, _, end) -> local.hour < end }
+            val midnight = local.toLocalDate().atStartOfDay()
+            return ChallengeRound(
+                name,
+                midnight.plusHours(start.toLong()).atZone(seoul).toInstant(),
+                midnight.plusHours(end.toLong()).atZone(seoul).toInstant(),
+            )
         }
     }
 }

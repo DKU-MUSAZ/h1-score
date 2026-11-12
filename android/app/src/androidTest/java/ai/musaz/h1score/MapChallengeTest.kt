@@ -39,6 +39,11 @@ class MapChallengeTest {
             ui.onNode(popularSpot).assertIsDisplayed()
         }
         screenshot("popular-spots")
+        val dankook = hasText("단국대학교 죽전캠퍼스") and hasText("참가 예시 10명")
+        ui.onNode(dankook).performClick()
+        waitFor("챌린지 지도")
+        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertDoesNotExist()
+        ui.onNodeWithText("목적지 검색으로 돌아가기").performClick()
         ui.onNode(hasSetTextAction()).performTextInput("한강")
         suggestions.performScrollToNode(hasText("“한강” 검색"))
         ui.onNodeWithText("“한강” 검색").assertIsDisplayed()
@@ -58,6 +63,39 @@ class MapChallengeTest {
         waitFor(initialGreeting)
         ui.onNodeWithText(initialGreeting).assertIsDisplayed()
     }
+    @Test fun nearbyDestinationShowsChallengeBeforeOpeningNavigation() {
+        searchFor("더현대 서울")
+        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertIsDisplayed()
+        ui.onNodeWithText("내비 목적지 · 더현대 서울", substring = true).assertIsDisplayed()
+        ui.onNodeWithText("여의도 한강공원 · 참가 예시", substring = true).assertIsDisplayed()
+        ui.onNodeWithText("내장 내비에서 검색할까요?").assertDoesNotExist()
+        screenshot("nearby-destination")
+    }
+
+    @Test fun distantDestinationShowsDirectionsBeforeOpeningNavigation() {
+        searchFor("서울역")
+        ui.onNodeWithText("일반 길 안내를 시작할까요?").assertIsDisplayed()
+        ui.onNodeWithText("‘서울역’에서 1km 안에 챌린지 개최지가 없어요.", substring = true).assertIsDisplayed()
+        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertDoesNotExist()
+        screenshot("distant-destination")
+    }
+
+    @Test fun unresolvedDestinationKeepsSearchFallback() {
+        val keyword = "무사즈_없는_장소_54813"
+        searchFor(keyword)
+        ui.onNodeWithText("내장 내비에서 검색할까요?").assertIsDisplayed()
+        ui.onNodeWithText("검색 계속").performClick()
+        ui.onNode(hasSetTextAction()).assertTextContains(keyword)
+        ui.onNodeWithText("내장 내비에서 검색할까요?").assertDoesNotExist()
+    }
+
+    private fun searchFor(keyword: String) {
+        val search = ui.onNode(hasSetTextAction())
+        ui.waitUntil(15_000) { ui.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        search.performClick().performTextInput(keyword)
+        ui.onNodeWithText("“${keyword}” 검색").performClick()
+    }
+
     private fun screenshot(name: String) {
         val instrumentation=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         val image=instrumentation.uiAutomation.takeScreenshot()

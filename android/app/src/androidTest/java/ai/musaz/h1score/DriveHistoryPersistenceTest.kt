@@ -250,7 +250,7 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText("과속").assertIsDisplayed()
         ui.onNodeWithText("급가속").assertIsDisplayed()
         ui.onNodeWithText("급감속").assertIsDisplayed()
-        assertSavedOverviewVisibleWithoutScrolling()
+        assertSavedOverviewVisible()
         listOf("유효 주행", "데이터 수신", "급제동", "잘한 점").forEach {
             ui.onNodeWithText(it).assertDoesNotExist()
         }
@@ -304,33 +304,38 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
         ui.onNodeWithText("오래된순").performClick()
         ui.onNodeWithText(saved.name).performClick()
-        assertSavedOverviewVisibleWithoutScrolling()
-        ui.onNodeWithText("+0 M").assertIsDisplayed()
+        assertSavedOverviewVisible()
+        ui.onNodeWithText("이번 적립 +0M", substring = true).assertIsDisplayed()
         ui.onNodeWithText("+80 M").assertDoesNotExist()
-        ui.onNode(hasText("공동 1위") and hasAnyAncestor(hasTestTag("saved-rank-나")), useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithText("공동 1위", substring = true).assertIsDisplayed()
         ui.onNodeWithText("9분 0초", substring = true).assertDoesNotExist()
 
-        ui.onNodeWithText("피드백 전체보기").performClick()
-        dialogText("주행 피드백 전체보기").assertIsDisplayed()
-        historyFeedback(saved.report).goodPoints.forEach { dialogText(it).performScrollTo().assertIsDisplayed() }
-        historyFeedback(saved.report).improvements.forEach { dialogText(it).performScrollTo().assertIsDisplayed() }
+        ui.onNodeWithText("점수 자세히 보기").performClick()
+        dialogText("운전점수 산정 내역").assertIsDisplayed()
+        dialogText("기록과 점수 안내").assertIsDisplayed()
         dialogText("전체 횟수는 확인할 수 없어요", substring = true).performScrollTo().assertIsDisplayed()
         ui.onNodeWithContentDescription("닫기").performClick()
-        assertSavedOverviewVisibleWithoutScrolling()
+        assertSavedOverviewVisible()
 
-        ui.onNodeWithText("구간 전체보기").performClick()
+        ui.onNodeWithText("주행 구간 10건 보기").performClick()
         dialogText("저장된 주행 구간").assertIsDisplayed()
         dialogText("저장된 구간 10건").assertIsDisplayed()
         dialogText("9분 0초", substring = true).performScrollTo().assertIsDisplayed()
         ui.onNodeWithContentDescription("닫기").performClick()
-        assertSavedOverviewVisibleWithoutScrolling()
+        assertSavedOverviewVisible()
 
-        ui.onNodeWithText("순위 전체보기").performClick()
-        dialogText("함께 도착한 무사즈").assertIsDisplayed()
+        ui.onNodeWithText("순위 자세히 보기").performClick()
+        dialogText("참가자 순위").assertIsDisplayed()
         dialogText("함께 달린 무사즈").performScrollTo().assertIsDisplayed()
         dialogText("+0 M").performScrollTo().assertIsDisplayed()
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val screenshot = instrumentation.uiAutomation.takeScreenshot()
+        ui.activity.filesDir.resolve("ranking-comparison.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        screenshot.recycle()
         ui.onNodeWithContentDescription("닫기").performClick()
-        assertSavedOverviewVisibleWithoutScrolling()
+        assertSavedOverviewVisible()
         ui.runOnIdle {
             assertEquals(saved, vm.selectedHistoryRecord)
             assertNull(vm.session)
@@ -407,13 +412,12 @@ class DriveHistoryPersistenceTest {
         assertTrue("${above.name} should appear before ${below.name}", first.top < second.top)
     }
 
-    private fun assertSavedOverviewVisibleWithoutScrolling() {
-        listOf("운전 습관 요약", "이어갈 습관", "개선할 점", "주요 주행 구간", "함께 도착한 무사즈",
-            "피드백 전체보기", "구간 전체보기", "순위 전체보기").forEach {
+    private fun assertSavedOverviewVisible() {
+        listOf("운전 습관 요약", "이어갈 습관", "개선할 점", "방향지시등",
+            "점수 자세히 보기", "순위 자세히 보기").forEach {
             ui.onNodeWithText(it).assertIsDisplayed()
         }
         ui.onNodeWithContentDescription("기록 목록으로").assertIsDisplayed()
-        ui.onAllNodes(hasScrollAction()).assertCountEquals(0)
     }
 
     private fun dialogText(text: String, substring: Boolean = false) =

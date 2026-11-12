@@ -166,12 +166,33 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var demoRoundStart = Instant.EPOCH
     private var demoStartedAt = 0L
     var missedDeadline by mutableStateOf(false); private set
-    internal val destinationVenueMatch get() = nearestEligibleVenue(
-        if (demo) selected.point else currentNavigationPlace?.point,
-        challengeSpots.map { ChallengeVenue(it.venueId, requireNotNull(it.point)) })
+    private fun matchVenue(point: GeoPoint?) = nearestEligibleVenue(
+        point, challengeSpots.map { ChallengeVenue(it.venueId, requireNotNull(it.point)) })
+
+    internal fun venueFor(place: SavedPlace): Destination? = matchVenue(place.point)?.let { match ->
+        challengeSpots.first { it.venueId == match.venue.id }
+    }
+
+    internal val destinationVenueMatch get() = matchVenue(
+        if (demo) selected.point else currentNavigationPlace?.point)
     internal val matchedVenue get() = destinationVenueMatch?.let { match -> challengeSpots.find { it.venueId == match.venue.id } }
     val destinationInChallengeGroup get() = destinationVenueMatch != null
     private var requestedVenueId: String? = null
+    private var requestedRoutePoint: GeoPoint? = null
+    private var dismissedRouteInvitation by mutableStateOf<String?>(null)
+
+    internal val routeInvitationVenue: Destination?
+        get() {
+            val routeId = live.destinationId ?: return null
+            return matchedVenue.takeIf {
+                !demo && canChooseDestination && hasLiveRoute && !live.arrived &&
+                    trackedSpot == null && routeId != dismissedRouteInvitation
+            }
+        }
+
+    internal fun dismissRouteInvitation() {
+        dismissedRouteInvitation = live.destinationId
+    }
 
     internal fun continueWithoutChallenge() {
         if (!canChooseDestination || !live.parked) return
@@ -188,13 +209,17 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     fun joinMapChallenge(round: ChallengeRound, venue: Destination = hangangChallenge) {
-        val venuePlace = SavedPlace.from(venue.name,venue.point) ?: return
+        val place = SavedPlace.from(venue.name, venue.point) ?: return
+        joinDestinationChallenge(round, venue, place)
+    }
+
+    internal fun joinDestinationChallenge(round: ChallengeRound, venue: Destination, place: SavedPlace) {
         if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !canJoinRound(round)) return
         if (demo) {
             selectDestination(venue)
             accept(round)
             if (activeJourney) {
-                if (live.parked && connection.requestSavedRoute(venuePlace)) {
+                if (live.parked && connection.requestSavedRoute(place)) {
                     openBuiltInNavigation()
                 } else {
                     notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
@@ -209,14 +234,16 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         if (!beginService()) return
         activeRound = round
         requestedVenueId = venue.venueId
+        requestedRoutePoint = place.point
         routeRequestedAt = SystemClock.elapsedRealtime()
         awaitingMapRoute = true
-        if (!connection.requestSavedRoute(venuePlace)) {
+        if (!connection.requestSavedRoute(place)) {
             awaitingMapRoute = false
             endService()
             notice = "내비 경로를 요청하지 못했어요. 연결 상태를 확인해 주세요."
             return
         }
+        rememberDestination(place.name)
         routeTimeout = viewModelScope.launch {
             delay(20_000)
             awaitingMapRoute = false
@@ -227,9 +254,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     fun navigateToChallengeWithoutJoining(venue: Destination = hangangChallenge) {
-        if (!parked || activeJourney || awaitingMapRoute) return
-        if (connection.requestSavedRoute(SavedPlace.from(venue.name, venue.point) ?: return)) openBuiltInNavigation()
-        else searchInNavigation(venue.name)
+        SavedPlace.from(venue.name, venue.point)?.let(::navigateToPlace)
+    }
+
+    internal fun navigateToPlace(place: SavedPlace) {
+        if (!canChooseDestination) return
+        rememberDestination(place.name)
+        if (connection.requestSavedRoute(place)) openBuiltInNavigation()
+        else searchInNavigation(place.name)
     }
 
     fun searchInNavigation(keyword: String) {
@@ -416,13 +448,17 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     internal fun receiveVehicle(next: LiveVehicle, receivedAt: Long = SystemClock.elapsedRealtime()) {
+        if (next.routeCancelled || (next.destinationId != null && next.destinationId != dismissedRouteInvitation)) {
+            dismissedRouteInvitation = null
+        }
         live=next
         // Console tests use real speed with explicit test limit/belt assumptions. Navigation,
         // turn, collection and belt-disqualification events must not settle a test as a trip.
         if (consoleTest && activeJourney) return
         if (!demo) {
             if (awaitingMapRoute && next.destinationAt >= routeRequestedAt && hasLiveRoute &&
-                destinationVenueMatch?.venue?.id == requestedVenueId && next.destinationId != null && !next.arrived) {
+                destinationVenueMatch?.venue?.id == requestedVenueId && next.destinationId != null && !next.arrived &&
+                requestedRoutePoint?.let { point -> next.destinationPoint?.distanceMetersTo(point) }?.let { it <= 150.0 } == true) {
                 awaitingMapRoute = false
                 routeTimeout?.cancel()
                 startSession()

@@ -25,9 +25,10 @@ class MyProfileUiTest {
                 vm.navigate(Screen.PROFILE)
             }
             ui.setContent { H1App(vm) }
-            ui.onNodeWithText("기본 프로필").assertExists()
-            ui.onNodeWithText("나의 차 상태").assertExists()
-            ui.onAllNodesWithText("미확인").onFirst().assertExists()
+            ui.onNodeWithContentDescription("무사즈 프로필 이미지").assertIsDisplayed()
+            ui.onNodeWithText("내 차 상태").assertIsDisplayed()
+            ui.onNodeWithText("시연 모드가 켜져 있어요").assertIsDisplayed()
+            ui.onNodeWithText("연료 잔량").assertDoesNotExist()
             ui.onNodeWithText("닉네임 변경").performClick()
             val input=ui.onNode(hasSetTextAction())
             input.performTextReplacement("   ")
@@ -36,6 +37,13 @@ class MyProfileUiTest {
             ui.onNodeWithText("저장").performClick()
             ui.onNodeWithText("Profile QA").assertExists()
             assertEquals("Profile QA",prefs.getString("profile-nickname",null))
+            SystemClock.sleep(350) // Let the system finish the dialog exit animation.
+            val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            val screenshot = instrumentation.uiAutomation.takeScreenshot()
+            ui.activity.filesDir.resolve("profile-qa.png").outputStream().use {
+                screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+            screenshot.recycle()
         } finally {
             prefs.edit().putString("profile-nickname",previous).commit()
         }
