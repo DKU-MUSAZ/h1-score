@@ -125,7 +125,8 @@ class CollectionRecordingTest {
 
     @Test fun customShortcutEditorAddsSchoolAndRequiresRealPlace() {
         val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle()); switchSource() } }
-        ui.setContent { MaterialTheme { DestinationShortcutEditor(vm,null) {} } }
+        var editorOpen by mutableStateOf(true)
+        ui.setContent { MaterialTheme { if (editorOpen) DestinationShortcutEditor(vm, null) { editorOpen = false } } }
         ui.onNode(hasSetTextAction()).performTextReplacement("학교")
         ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText("바로가기 추가").performSemanticsAction(SemanticsActions.OnClick)
@@ -138,9 +139,9 @@ class CollectionRecordingTest {
         ui.onNodeWithText("저장").assertIsNotEnabled()
         ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
         ui.waitUntil(3000) { ui.onAllNodesWithText("현재 내비 목적지 선택: 서울역").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performClick()
+        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
         ui.runOnIdle { vm.receiveVehicle(vm.live.copy(speedAt = SystemClock.elapsedRealtime())) }
-        ui.onNodeWithText("저장").performClick()
+        ui.onNodeWithText("저장").performSemanticsAction(SemanticsActions.OnClick)
         ui.runOnIdle { assertEquals("서울역",vm.destinationShortcuts.single {it.label=="학교"}.place?.name) }
     }
 
