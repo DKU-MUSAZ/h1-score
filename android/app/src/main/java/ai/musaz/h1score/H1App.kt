@@ -133,7 +133,7 @@ private val Gold=H1Style.Gold
                 .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
                 Box(Modifier.size(34.dp), contentAlignment=Alignment.Center) {
                     Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
                 }
@@ -298,7 +298,7 @@ private val Gold=H1Style.Gold
             .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
             .alpha(if (enabled) 1f else .45f)
             .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
