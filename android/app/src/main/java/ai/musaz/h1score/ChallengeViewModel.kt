@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToLong
 import org.json.JSONArray
@@ -440,10 +441,36 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var balance by mutableIntStateOf(ledger.balance); private set
     var redeemedRewards by mutableStateOf(readRedeemedRewards())
         private set
+    var couponNumbers by mutableStateOf(readCouponNumbers())
+        private set
+
+    private fun couponNumberKey(rewardId: String) = mileageKey("coupon-number-$rewardId")
+
+    private fun newCouponNumber(): String {
+        val digits = UUID.randomUUID().toString().replace("-", "").take(12).uppercase(Locale.ROOT)
+        return digits.chunked(4).joinToString("-", prefix = "AJ-")
+    }
+
+    private fun readCouponNumbers(): Map<String, String> {
+        val missing = mutableMapOf<String, String>()
+        val numbers = redeemedRewards.associateWith { rewardId ->
+            val key = couponNumberKey(rewardId)
+            prefs.getString(key, null)?.takeIf { it.isNotBlank() }
+                ?: newCouponNumber().also { missing[key] = it }
+        }
+        if (missing.isNotEmpty()) {
+            val editor = prefs.edit()
+            missing.forEach { (key, number) -> editor.putString(key, number) }
+            editor.apply()
+        }
+        return numbers
+    }
+
     private fun reloadMileage() {
         ledger = readMileage()
         balance = ledger.balance
         redeemedRewards = readRedeemedRewards()
+        couponNumbers = readCouponNumbers()
     }
 
     private fun writeMileage(editor: SharedPreferences.Editor) {
@@ -460,10 +487,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
 
     internal fun redeemDemoReward(reward: MileageReward) {
         if (!demo || !parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
+        val number = newCouponNumber()
         balance = ledger.balance
         redeemedRewards = redeemedRewards + reward.id
+        couponNumbers = couponNumbers + (reward.id to number)
         prefs.edit().putInt(mileageKey("balance"), balance)
-            .putStringSet(mileageKey("redeemed-rewards"), redeemedRewards).apply()
+            .putStringSet(mileageKey("redeemed-rewards"), redeemedRewards)
+            .putString(couponNumberKey(reward.id), number).apply()
     }
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()

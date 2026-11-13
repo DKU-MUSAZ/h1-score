@@ -309,7 +309,10 @@ class CollectionRecordingTest {
         val app=isolatedApplication()
         app.prefs.edit().putInt("balance",100).commit()
         val model=ui.runOnIdle { ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle());switchSource();navigate(Screen.WALLET)
+            receiveVehicle(parkedVehicle())
+            switchSource()
+            receiveVehicle(LiveVehicle(speedMps = 0.0, gearPark = null, uxRestricted = false))
+            navigate(Screen.WALLET)
         } }
         ui.setContent { H1App(model) }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
@@ -317,7 +320,8 @@ class CollectionRecordingTest {
         ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("엔진오일",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("나의 쿠폰함").performScrollTo().performClick()
-        ui.onNodeWithText("아직 교환한 혜택이 없어요.").assertIsDisplayed()
+        ui.onNodeWithText("시연 예시 쿠폰").assertIsDisplayed()
+        ui.onNodeWithText("AJ-7C29-4B16-8305").assertIsDisplayed()
         ui.onNodeWithText("확인").performClick()
         ui.runOnIdle {assertEquals(100,model.balance)}
         val image=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
@@ -332,31 +336,64 @@ class CollectionRecordingTest {
         ui.onNodeWithContentDescription("와이퍼 상세").performClick()
         ui.onNodeWithText("교환하기").performClick()
         ui.runOnIdle {assertEquals(20,model.balance);assertTrue("wiper" in model.redeemedRewards)}
+        val number = ui.runOnIdle { model.couponNumbers.getValue("wiper") }
+        assertTrue(number.matches(Regex("AJ-(?:[0-9A-F]{4}-){2}[0-9A-F]{4}")))
         ui.onNodeWithText("쿠폰 교환이 완료됐어요").assertIsDisplayed()
-        ui.onNode(hasText("교환 완료") and hasClickAction() and hasAnyAncestor(isDialog())).assertIsNotEnabled()
+        ui.onNode(hasText("교환 완료") and hasAnyAncestor(isDialog())).assertIsNotEnabled()
         ui.onNodeWithText("닫기").performClick()
         ui.onNodeWithContentDescription("와이퍼 상세").performClick()
-        ui.onNode(hasText("교환 완료") and hasClickAction() and hasAnyAncestor(isDialog())).assertIsNotEnabled()
+        ui.onNode(hasText("교환 완료") and hasAnyAncestor(isDialog())).assertIsNotEnabled()
         ui.runOnIdle {model.redeemDemoReward(mileageRewards.first());assertEquals(20,model.balance)}
         ui.onNodeWithText("닫기").performClick()
         ui.onNodeWithContentDescription("에어컨 필터 상세").performClick()
-        ui.onNodeWithText("마일리지가 부족해요").assertIsDisplayed()
-        ui.onNodeWithText("280 M 더 모으면 교환할 수 있어요.").assertIsDisplayed()
+        ui.onNodeWithText("마일리지가 부족해요").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("280 M 더 모으면 교환할 수 있어요.").performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("교환하기").assertIsNotEnabled()
         ui.runOnIdle {model.redeemDemoReward(mileageRewards[1]);assertEquals(20,model.balance);assertTrue("filter" !in model.redeemedRewards)}
         ui.onNodeWithText("취소").performClick()
         ui.onNodeWithText("나의 쿠폰함").performScrollTo().performClick()
         ui.onNodeWithText("와이퍼 교환").assertIsDisplayed()
         ui.onNodeWithText("시연 교환 완료").assertIsDisplayed()
+        ui.onNodeWithText(number).assertIsDisplayed()
+        ui.onNodeWithText("AJ-7C29-4B16-8305").assertIsDisplayed()
+        val couponImage = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        ui.activity.filesDir.resolve("mileage-coupon-numbers.png").outputStream().use {
+            couponImage.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        couponImage.recycle()
         ui.onNodeWithText("확인").performClick()
         ui.runOnIdle {
             assertEquals(20,model.balance)
-            assertTrue("wiper" in ChallengeViewModel(app).redeemedRewards)
+            val restored = ChallengeViewModel(app)
+            restored.receiveVehicle(parkedVehicle())
+            restored.switchSource()
+            assertTrue("wiper" in restored.redeemedRewards)
+            assertEquals(number, restored.couponNumbers["wiper"])
+            restored.switchSource()
+            assertTrue(restored.couponNumbers.isEmpty())
         }
         ui.runOnIdle {model.navigate(Screen.PROFILE)}
         ui.onAllNodes(hasText("마이페이지") and isHeading()).assertCountEquals(1)
         ui.runOnIdle {model.navigate(Screen.BADGES)}
         ui.onAllNodesWithText("배지 컬렉션").assertCountEquals(1)
+    }
+
+    @Test fun existingDemoCouponGetsAStableNumberWithoutSpendingMileage() {
+        val app = isolatedApplication()
+        app.prefs.edit().putInt("balance", 100).putStringSet("redeemed-rewards", setOf("filter")).commit()
+
+        ui.runOnIdle {
+            fun demoModel() = ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+            }
+            val first = demoModel()
+            val number = first.couponNumbers.getValue("filter")
+            val restored = demoModel()
+            assertEquals(number, restored.couponNumbers["filter"])
+            assertEquals(setOf("filter"), restored.redeemedRewards)
+            assertEquals(100, restored.balance)
+        }
     }
 
     @Test fun resultFeedbackPersistsAndScoreDialStaysSquare() {
