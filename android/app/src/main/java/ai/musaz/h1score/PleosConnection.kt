@@ -21,6 +21,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import ai.pleos.playground.vehicle.Vehicle
+import ai.pleos.playground.vehicle.api.model.area.DoorArea
+import ai.pleos.playground.vehicle.api.model.area.WindowArea
+import ai.pleos.playground.vehicle.api.model.capability.AreaBounds
 import ai.pleos.playground.vehicle.api.model.capability.AccessType
 import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
@@ -154,32 +157,57 @@ class PleosConnection(private val context: Context) {
     /** Extra read-only telemetry requested only while My Page is visible. */
     internal suspend fun readProfileEnergy(): ProfileEnergy = kotlinx.coroutines.coroutineScope {
         val source=vehicle?.takeIf { active } ?: return@coroutineScope ProfileEnergy()
+        val range = async { profileRead<Float> { ok, fail -> source.getOdometer().getRangeRemainingDistance(ok, fail) } }
+        val locks = async {
+            val areas = profileRead<List<DoorArea>> { ok, fail ->
+                source.getDoor().checkDoorLockCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
+            }.orEmpty()
+            areas.map { area -> async {
+                val locked = profileRead<Boolean> { ok, fail -> source.getDoor().getDoorLockState(area, ok, fail) }
+                area.values.map { it.name to locked }
+            } }.flatMap { it.await() }.toMap()
+        }
+        val chargePort = async { profileRead<Boolean> { ok, fail ->
+            source.getEvBattery().checkEvChargePortOpenCapabilities({ capability ->
+                if (readable(capability)) source.getEvBattery().isEvChargePortOpen(ok, fail) else ok(null)
+            }, fail)
+        } }
+        val lowBeam = async { profileRead<String> { ok, fail ->
+            source.getLight().checkLowBeamLightStateCapabilities({ capability, _ ->
+                if (readable(capability)) source.getLight().getCurrentLowBeamLightState({ ok(it?.name) }, fail) else ok(null)
+            }, fail)
+        } }
+        val highBeam = async { profileRead<String> { ok, fail ->
+            source.getLight().checkHighBeamLightStateCapabilities({ capability, _ ->
+                if (readable(capability)) source.getLight().getCurrentHighBeamLightState({ ok(it?.name) }, fail) else ok(null)
+            }, fail)
+        } }
+        val doors = async {
+            val areas = profileRead<Map<DoorArea, AreaBounds<Int>>> { ok, fail ->
+                source.getDoor().checkDoorPositionCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
+            }.orEmpty()
+            areas.map { (area, bounds) -> async {
+                val open = profileRead<Int> { ok, fail -> source.getDoor().getCurrentDoorPosition(area, ok, fail) }
+                    ?.takeIf { it in bounds.minValue..bounds.maxValue }?.let { it != 0 }
+                area.values.map { it.name to open }
+            } }.flatMap { it.await() }.toMap()
+        }
+        val windows = async {
+            val areas = profileRead<Map<WindowArea, AreaBounds<Int>>> { ok, fail ->
+                source.getWindow().checkWindowPositionCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
+            }.orEmpty()
+            areas.map { (area, bounds) -> async {
+                val open = profileRead<Int> { ok, fail -> source.getWindow().getCurrentWindowPosition(area, ok, fail) }
+                    ?.takeIf { it in bounds.minValue..bounds.maxValue }?.let { it != 0 }
+                area.values.map { it.name to open }
+            } }.flatMap { it.await() }.toMap()
+        }
         val battery=async { profileRead<Int> { ok, fail -> source.getEvBattery().getEvBatteryStateOfCharge(ok,fail) } }
-        val fuel=async { profileRead<Int> { ok, fail -> source.getFuel().getFuelPercent(ok,fail) } }
-        val oil=async { profileRead<String> { ok, fail -> source.getSafety().getEngineOilLevelState({ ok(it?.name) },fail) } }
-        val steering=async { profileRead<Float> { ok, fail -> source.getSteeringWheel().getCurrentSteeringWheelAngle(ok,fail) } }
-        val washerFluidLow=async { profileRead<Boolean> { ok, fail ->
-            source.getSafety().checkLowWasherFluidWarningStateCapabilities({ capability ->
-                if(readable(capability)) source.getSafety().hasLowWasherFluidWarning(ok,fail) else ok(null)
-            },fail)
-        } }
-        val evEfficiency=async { profileRead<Float> { ok, fail ->
-            source.getEvBattery().checkCurrentEvEfficiencyCapabilities({ capability ->
-                if(readable(capability)) source.getEvBattery().getCurrentEvEfficiency(ok,fail) else ok(null)
-            },fail)
-        } }
-        val fuelEconomy=async { profileRead<Float> { ok, fail ->
-            source.getFuel().checkCurrentFuelEconomyCapabilities({ capability ->
-                if(readable(capability)) source.getFuel().getCurrentFuelEconomy(ok,fail) else ok(null)
-            },fail)
-        } }
         val result=ProfileEnergy(
+            rangeMeters = range.await()?.takeIf { it.isFinite() && it >= 0f },
+            doorOpen = doors.await(), windowOpen = windows.await(), doorLocked = locks.await(),
+            chargePortOpen = chargePort.await(), lowBeam = lowBeam.await(), highBeam = highBeam.await(),
             battery=battery.await()?.takeIf { it in 0..100 },
-            fuel=fuel.await()?.takeIf { it in 0..100 },
-            oil=oil.await(), steering=steering.await()?.takeIf { it.isFinite() },
-            washerFluidLow=washerFluidLow.await(),
-            evEfficiency=evEfficiency.await()?.takeIf { it.isFinite() && it>=0f },
-            fuelEconomy=fuelEconomy.await()?.takeIf { it.isFinite() && it>=0f },
         )
         if(active && vehicle===source) result else ProfileEnergy()
     }

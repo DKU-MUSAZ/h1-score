@@ -41,8 +41,26 @@ private val ProfileText = Color(0xFF526479)
 private val ProfileWarning = Color(0xFFA62B25)
 
 internal data class ProfileEnergy(
-    val battery: Int?=null, val fuel: Int?=null, val oil: String?=null, val steering: Float?=null,
-    val washerFluidLow: Boolean?=null, val evEfficiency: Float?=null, val fuelEconomy: Float?=null,
+    val battery: Int? = null,
+    val rangeMeters: Float? = null,
+    val doorOpen: Map<String, Boolean?> = emptyMap(),
+    val windowOpen: Map<String, Boolean?> = emptyMap(),
+    val doorLocked: Map<String, Boolean?> = emptyMap(),
+    val chargePortOpen: Boolean? = null,
+    val lowBeam: String? = null,
+    val highBeam: String? = null,
+)
+
+// Presentation-only examples: never fed into the vehicle/scoring/collection state.
+internal fun demoProfileEnergy() = ProfileEnergy(
+    battery = 78,
+    rangeMeters = 320_000f,
+    doorOpen = listOf("ROW_1_LEFT", "ROW_1_RIGHT", "ROW_2_LEFT", "ROW_2_RIGHT", "HOOD", "REAR").associateWith { false },
+    windowOpen = listOf("ROW_1_LEFT", "ROW_1_RIGHT", "ROW_2_LEFT", "ROW_2_RIGHT").associateWith { false },
+    doorLocked = listOf("ROW_1_LEFT", "ROW_1_RIGHT", "ROW_2_LEFT", "ROW_2_RIGHT").associateWith { true },
+    chargePortOpen = false,
+    lowBeam = "ON",
+    highBeam = "OFF",
 )
 
 private data class ProfileMetric(val label: String, val value: String?, val needsAttention: Boolean = false)
@@ -55,7 +73,7 @@ internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(enabled, vm.demo) {
         if (!enabled) editing = false
-        energy = ProfileEnergy()
+        energy = if (vm.demo) demoProfileEnergy() else ProfileEnergy()
         if (!vm.demo) {
             while (enabled) {
                 now = SystemClock.elapsedRealtime()
@@ -135,66 +153,41 @@ internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
                 ) { Icon(Icons.Outlined.DirectionsCar, null, tint = H1Style.Ink) }
                 Column {
                     Text("내 차 상태", fontSize = 23.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-                    if (!vm.demo) {
-                        val source = if (Build.HARDWARE in listOf("ranchu", "goldfish")) "시뮬레이터 차량 정보"
-                            else "연결된 차량 정보"
-                        Text(source, fontSize = 14.sp, color = ProfileText)
-                    }
+                    val source = if (vm.demo) "시연용 예시 차량 정보"
+                        else if (Build.HARDWARE in listOf("ranchu", "goldfish")) "시뮬레이터 차량 정보"
+                        else "연결된 차량 정보"
+                    Text(source, fontSize = 14.sp, color = ProfileText)
                 }
             }
             HorizontalDivider(Modifier.padding(vertical = 16.dp), color = H1Style.Line)
 
-            if (vm.demo) {
-                Text("시연 모드가 켜져 있어요", fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = H1Style.Ink)
-                Spacer(Modifier.height(6.dp))
-                Text("차량 상태는 Pleos 연결 모드에서 확인할 수 있어요.", fontSize = 15.sp, color = ProfileText)
-            } else {
+            run {
                 val live = vm.live
-                val belt = live.belt.takeIf { observedAt - live.beltAt in 0..2500 }
-                val steering = energy.steering?.let { angle ->
-                    // Pleos reports clockwise steering-wheel rotation as negative.
-                    val magnitude = "%.1f°".format(abs(angle))
-                    when {
-                        abs(angle) < 0.05f -> "중앙 0.0°"
-                        angle < 0f -> "오른쪽 $magnitude"
-                        else -> "왼쪽 $magnitude"
-                    }
+                val belt = if (vm.demo) true else live.belt.takeIf { observedAt - live.beltAt in 0..2500 }
+                val odometer = if (vm.demo) 12_345f else live.odometer.takeIf { observedAt - live.odometerAt in 0..5000 }
+                val safety = listOf(
+                    ProfileMetric("운전석 안전벨트", belt?.let { if (it) "착용" else "미착용" }, belt == false),
+                    ProfileMetric("문", openingSummary(energy.doorOpen.filterKeys { it.startsWith("ROW_") }), energy.doorOpen.any { it.key.startsWith("ROW_") && it.value == true }),
+                    ProfileMetric("문 잠금", doorLockSummary(energy.doorLocked.filterKeys { it.startsWith("ROW_") })),
+                    ProfileMetric("트렁크", openLabel(energy.doorOpen["REAR"]), energy.doorOpen["REAR"] == true),
+                    ProfileMetric("보닛", openLabel(energy.doorOpen["HOOD"]), energy.doorOpen["HOOD"] == true),
+                    ProfileMetric("창문", openingSummary(energy.windowOpen), energy.windowOpen.values.any { it == true }),
+                ).filter { it.value != null }
+                val driving = listOf(
+                    ProfileMetric("배터리 잔량", energy.battery?.let { "$it%" }),
+                    ProfileMetric("예상 주행 가능거리", energy.rangeMeters?.let { "%,.0f km".format(it / 1000f) }),
+                    ProfileMetric("누적 주행거리", odometer?.let { "%,.1f km".format(it) }),
+                    ProfileMetric("충전구 덮개", openLabel(energy.chargePortOpen), energy.chargePortOpen == true),
+                    ProfileMetric("전조등", lightLabel(energy.lowBeam)),
+                    ProfileMetric("상향등", lightLabel(energy.highBeam), energy.highBeam == "ON"),
+                ).filter { it.value != null }
+                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                    if (safety.isNotEmpty()) ProfileMetrics("출발 전 확인", safety, Modifier.weight(1f).fillMaxHeight())
+                    if (driving.isNotEmpty()) ProfileMetrics("주행 및 충전", driving, Modifier.weight(1.1f).fillMaxHeight())
                 }
-                val odometer = live.odometer.takeIf { observedAt - live.odometerAt in 0..5000 }
-                val oilLevel = when (energy.oil) {
-                    "NORMAL" -> "정상"
-                    "LOW" -> "낮음"
-                    "CRITICALLY_LOW" -> "매우 낮음"
-                    "HIGH" -> "높음"
-                    else -> null
+                if (safety.isEmpty() && driving.isEmpty()) {
+                    Text("차량 정보를 기다리고 있어요", fontSize = 19.sp, color = ProfileText)
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                    ProfileMetrics(
-                        "운전 상태",
-                        listOf(
-                            ProfileMetric("운전석 안전벨트", belt?.let { if (it) "착용" else "미착용" }, belt == false),
-                            ProfileMetric("핸들 각도", steering),
-                            ProfileMetric("누적 주행거리", odometer?.let { "%,.1f km".format(it) }),
-                        ),
-                        Modifier.weight(1f),
-                    )
-                    ProfileMetrics(
-                        "에너지 및 관리",
-                        listOf(
-                            ProfileMetric("전기차 배터리", energy.battery?.let { "$it%" }),
-                            ProfileMetric("연료 잔량", energy.fuel?.let { "$it%" }),
-                            ProfileMetric("이번 주행 전비", energy.evEfficiency?.let { "%.1f km/kWh".format(it) }),
-                            ProfileMetric("이번 주행 연비", energy.fuelEconomy?.let { "%.1f L/100 km".format(it) }),
-                            ProfileMetric("엔진오일 수위", oilLevel, energy.oil in setOf("LOW", "CRITICALLY_LOW", "HIGH")),
-                            ProfileMetric("워셔액", energy.washerFluidLow?.let { if (it) "보충 필요" else "경고 없음" }, energy.washerFluidLow == true),
-                        ),
-                        Modifier.weight(1.1f),
-                    )
-                }
-                Text(
-                    "차종과 연결 권한에 따라 표시되는 항목이 달라요.",
-                    Modifier.padding(top = 12.dp), fontSize = 13.sp, color = ProfileText,
-                )
             }
         }
     }
@@ -220,6 +213,39 @@ internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
             },
             dismissButton = { TextButton(onClick = { editing = false }) { Text("취소") } },
         )
+    }
+}
+
+internal fun openLabel(open: Boolean?): String? = open?.let { if (it) "열림" else "닫힘" }
+
+internal fun lightLabel(state: String?): String? = when (state) {
+    "ON" -> "켜짐"
+    "OFF" -> "꺼짐"
+    "DAYTIME_RUNNING" -> "주간 주행등"
+    else -> null
+}
+
+internal fun doorLockSummary(states: Map<String, Boolean?>): String? {
+    if (states.values.none { it != null }) return null
+    val unlocked = states.values.count { it == false }
+    val unknown = states.values.any { it == null }
+    return when {
+        unlocked > 0 && unknown -> "${unlocked}곳 잠금 해제 · 일부 미확인"
+        unlocked > 0 -> "${unlocked}곳 잠금 해제"
+        unknown -> "일부 미확인"
+        else -> "모두 잠김"
+    }
+}
+
+internal fun openingSummary(states: Map<String, Boolean?>): String? {
+    if (states.values.none { it != null }) return null
+    val open = states.values.count { it == true }
+    val unknown = states.values.count { it == null }
+    return when {
+        open > 0 && unknown > 0 -> "${open}곳 열림 · 일부 미확인"
+        open > 0 -> "${open}곳 열림"
+        unknown > 0 -> "일부 미확인"
+        else -> "모두 닫힘"
     }
 }
 
@@ -251,8 +277,9 @@ private fun ProfileMetrics(title: String, metrics: List<ProfileMetric>, modifier
         )
         metrics.forEachIndexed { index, metric ->
             if (index > 0) HorizontalDivider(color = H1Style.Line)
+            val rowHeight = if (metrics.size >= 4) Modifier.weight(1f) else Modifier
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(vertical = 5.dp),
+                rowHeight.fillMaxWidth().heightIn(min = 60.dp).padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
