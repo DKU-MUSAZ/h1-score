@@ -1,6 +1,5 @@
 package ai.musaz.h1score
 
-import ai.musaz.h1score.core.DrivingEventType
 import ai.musaz.h1score.core.TurnVerdict
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -33,7 +32,7 @@ import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
 import kotlin.math.roundToInt
 
-internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
+internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
 
 @Composable internal fun SavedDriveDetailDialog(
     drive: CompletedDrive,
@@ -43,8 +42,8 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
     val frameDensity = LocalDensity.current
     val title = when (section) {
         SavedDriveDetailSection.FEEDBACK -> "운전점수 산정 내역"
-        SavedDriveDetailSection.EVENTS -> "저장된 주행 구간"
         SavedDriveDetailSection.RANKING -> "참가자 순위"
+        SavedDriveDetailSection.MILEAGE -> "마일리지 적립 내역"
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         CompositionLocalProvider(LocalDensity provides frameDensity) {
@@ -70,8 +69,8 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
                             ) {
                                 when (section) {
                                     SavedDriveDetailSection.FEEDBACK -> SavedFeedbackDetails(drive)
-                                    SavedDriveDetailSection.EVENTS -> SavedEventDetails(drive)
                                     SavedDriveDetailSection.RANKING -> SavedRankingDetails(drive)
+                                    SavedDriveDetailSection.MILEAGE -> SavedMileageDetails(drive)
                                 }
                             }
                         }
@@ -153,37 +152,6 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
     }
 }
 
-@Composable private fun SavedEventDetails(drive: CompletedDrive) {
-    val events = drive.report.events
-    Text("저장된 구간 ${events.size}건", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-    Text("시간과 거리는 기록 시작 이후의 경과 시간과 누적 유효 거리예요. 도로명이나 GPS 위치가 아닌 대략적인 구간입니다.",
-        fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-    if (events.isEmpty()) {
-        Text("저장된 주행 구간 정보가 없어요.", fontSize = 16.sp, color = H1Style.Ink)
-    }
-    events.forEachIndexed { index, event ->
-        val accent = event.type.detailColor()
-        Column(
-            Modifier.fillMaxWidth().background(accent.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            val label = when (event.type) {
-                DrivingEventType.OVERSPEED -> "제한속도 초과"
-                DrivingEventType.RAPID_ACCELERATION -> "급가속"
-                DrivingEventType.RAPID_DECELERATION -> decelerationEventLabel(drive.report)
-            }
-            Text("${index + 1}. $label", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accent)
-            Text("${event.elapsedMs / 60000}분 ${(event.elapsedMs / 1000) % 60}초 · 약 ${String.format(Locale.KOREA, "%.1f", event.distanceM / 1000)} km 부근",
-                fontSize = 14.sp, color = H1Style.Muted)
-            Text(when (event.type) {
-                DrivingEventType.OVERSPEED -> "제한 ${event.limitKph} km/h 구간에서 ${event.toKph.roundToInt()} km/h로 주행했어요."
-                DrivingEventType.RAPID_ACCELERATION -> "${event.fromKph.roundToInt()} → ${event.toKph.roundToInt()} km/h로 빠르게 가속했어요."
-                DrivingEventType.RAPID_DECELERATION -> "${event.fromKph.roundToInt()} → ${event.toKph.roundToInt()} km/h로 빠르게 감속했어요."
-            }, fontSize = 15.sp, lineHeight = 22.sp, color = H1Style.Ink)
-        }
-    }
-}
-
 @Composable private fun SavedRankingDetails(drive: CompletedDrive) {
     val ranking = drive.ranking
     val own = ranking.firstOrNull { it.id == "나" }
@@ -216,10 +184,18 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
             }
         }
     }
+    SavedMileageDetails(drive)
+}
+
+@Composable private fun SavedMileageDetails(drive: CompletedDrive) {
+    val own = drive.ranking.firstOrNull { it.id == "나" }
     Surface(color = H1Style.PaleMint, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("이번에 쌓인 마일리지", fontSize = 14.sp, color = H1Style.Muted)
-            Text("+${drive.earned} M", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Text(if (drive.isHistoryExample) "시연용 예시 보상" else "이번에 쌓인 마일리지",
+                fontSize = 14.sp, color = H1Style.Muted)
+            Text("+${drive.earned + drive.badgeMileage} M", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Text("순위 보상 +${drive.earned}M · 배지 보상 +${drive.badgeMileage}M",
+                fontSize = 14.sp, color = H1Style.Ink)
             if (own != null && own.miles != drive.earned) {
                 Text("순위로 배정된 ${own.miles} M와 실제 적립된 ${drive.earned} M는 달라요. 적립에는 목적지별 하루 1회·하루 2회 한도가 적용돼요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)

@@ -4,7 +4,7 @@ import ai.musaz.h1score.core.ScoreReport
 import ai.musaz.h1score.core.TurnVerdict
 import java.util.Locale
 
-internal data class HistoryFeedbackMetric(val label: String, val value: String, val detail: String)
+internal data class HistoryFeedbackMetric(val label: String, val value: String, val detail: String, val points: String)
 
 internal data class HistoryFeedback(
     val metrics: List<HistoryFeedbackMetric>,
@@ -21,19 +21,27 @@ internal fun historyFeedback(report: ScoreReport): HistoryFeedback {
     val overDistance = historyFeedbackDistance(report.overLimitDistanceM)
     val signalIssues = report.turns.count { it.verdict == TurnVerdict.UNUSED || it.verdict == TurnVerdict.MISMATCHED }
     val verifiedTurns = report.turns.count { it.verdict != TurnVerdict.UNVERIFIABLE }
+    val sharedBonus = "가감속 공통 +${scorePoints(report.accelerationPoints)}점"
+    val penalty = if (report.turnPenalty > 0) "−${scorePoints(report.turnPenalty)}" else "0.00"
+    fun metric(label: String, value: String, detail: String, points: String) =
+        HistoryFeedbackMetric(label, value, detail, if (report.score == null) "점수 미확정" else points)
+
     val metrics = listOf(
-        HistoryFeedbackMetric("과속", overDistance, "제한속도 초과 거리"),
-        HistoryFeedbackMetric("급가속", if (longitudinalPending && report.accelerationEvents == 0) "판정 보류" else "${report.accelerationEvents}회",
-            if (bonus) "해당 구간 가점 제외" else "기록된 급가속"),
-        HistoryFeedbackMetric("급감속", when {
+        metric("과속", overDistance, "제한속도 초과 거리",
+            if (bonus) "속도 가점 +${scorePoints(report.speedPoints)}점" else "속도 반영 +${scorePoints(report.compliance * .7)}점"),
+        metric("급가속", if (longitudinalPending && report.accelerationEvents == 0) "판정 보류" else "${report.accelerationEvents}회",
+            if (bonus) "해당 구간 가점 제외" else "기록된 급가속",
+            if (bonus) sharedBonus else "가속 반영 +${scorePoints(report.smoothness * .3)}점"),
+        metric("급감속", when {
             bonus && !longitudinalPending -> "${decelerations}회"
             decelerations > 0 -> "확인 ${decelerations}건"
             longitudinalPending -> "판정 보류"
             else -> "확인 내역 없음"
-        }, if (bonus) "해당 구간 가점 제외" else "저장된 구간 · 감점 제외"),
-        HistoryFeedbackMetric("방향지시등",
+        }, if (bonus) "해당 구간 가점 제외" else "저장된 구간 · 감점 제외",
+            if (bonus) sharedBonus else "점수 반영 없음"),
+        metric("방향지시등",
             if (verifiedTurns == 0) "판정 없음" else "${signalIssues}건",
-            "미사용·반대 방향"),
+            "미사용·반대 방향", if (bonus) "감점 ${penalty}점" else "점수 반영 없음"),
     )
     val good = buildList {
         if (report.score != null && report.validDistanceM > 0 && (!bonus || report.longitudinalReady)) {

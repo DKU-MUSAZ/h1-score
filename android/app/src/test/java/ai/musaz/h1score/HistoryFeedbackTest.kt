@@ -112,9 +112,36 @@ class HistoryFeedbackTest {
 
         assertEquals("판정 보류", feedback.metric("급가속").value)
         assertEquals("판정 보류", feedback.metric("급감속").value)
+        assertTrue(feedback.metrics.all { it.points == "점수 미확정" })
         assertEquals(listOf("현재 기록만으로 이어갈 습관을 판단하기 어려워요."), feedback.goodPoints)
         assertTrue(scorePendingMessage(report).contains("8Hz"))
         assertFalse(feedback.improvements.any { it.contains("지금의 운전 습관을 이어가") })
+    }
+
+    @Test fun metricPointsUseTheRecordedBonusesAndCappedTurnPenalty() {
+        val report = report().copy(
+            scoringVersion = ScoreEngine.VERSION,
+            speedPoints = 22.17,
+            accelerationPoints = 13.3,
+            longitudinalReady = true,
+            turns = List(6) { TurnEvent(1_000, 3_000, TurnDirection.LEFT, TurnVerdict.MISMATCHED) },
+        )
+
+        val feedback = historyFeedback(report)
+
+        assertEquals("속도 가점 +22.17점", feedback.metric("과속").points)
+        assertEquals("가감속 공통 +13.30점", feedback.metric("급가속").points)
+        assertEquals(feedback.metric("급가속").points, feedback.metric("급감속").points)
+        assertEquals("감점 −10.00점", feedback.metric("방향지시등").points)
+    }
+
+    @Test fun legacyMetricPointsFollowTheOriginalWeights() {
+        val feedback = historyFeedback(report())
+
+        assertEquals("속도 반영 +62.30점", feedback.metric("과속").points)
+        assertEquals("가속 반영 +30.00점", feedback.metric("급가속").points)
+        assertEquals("점수 반영 없음", feedback.metric("급감속").points)
+        assertEquals("점수 반영 없음", feedback.metric("방향지시등").points)
     }
 
     @Test fun formulaAndDecelerationExplanationFollowTheSavedScoringVersion() {

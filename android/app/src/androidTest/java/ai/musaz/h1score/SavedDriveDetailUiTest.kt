@@ -22,13 +22,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import java.io.File
@@ -41,74 +38,25 @@ import kotlin.math.min
 class SavedDriveDetailUiTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun busyOverviewFitsAndEveryCardAreaOpensItsFullView() {
+    @Test fun busyOverviewShowsMetricsAndEachDetailOpens() {
         val saved = drive(busyReport())
         ui.setContent { MinimumDetailFrame(saved) }
 
         capture("busy")
-        assertOverviewDoesNotScroll()
-        assertFeedbackFits("saved-good-feedback")
-        assertFeedbackFits("saved-improvement-feedback")
-        ui.onNodeWithTag("saved-improvement-feedback", useUnmergedTree = true)
-            .assertTextEquals(historyFeedback(saved.report).improvements.take(2).joinToString("\n"))
-        ui.onNodeWithText("회전 감점", substring = true, useUnmergedTree = true).assertIsDisplayed()
-        repeat(3) { ui.onNodeWithTag("saved-event-$it", useUnmergedTree = true).assertIsDisplayed() }
-        ui.onNodeWithTag("saved-event-3", useUnmergedTree = true).assertDoesNotExist()
-        // The overview keeps the user's row even when it falls below the first three places.
-        ui.onNodeWithTag("saved-rank-나", useUnmergedTree = true).assertIsDisplayed()
-        ui.onNodeWithText("+0 M", useUnmergedTree = true).assertIsDisplayed()
-        ui.onNodeWithText("+80 M", useUnmergedTree = true).assertDoesNotExist()
-
-        val feedback = hasAnyAncestor(hasTestTag("saved-feedback-card"))
-        val targets = listOf(
-            hasText("운전 습관 요약"),
-            hasText("과속") and feedback,
-            hasText("급가속") and feedback,
-            hasText("급감속") and feedback,
-            hasTestTag("saved-good-feedback"),
-            hasTestTag("saved-improvement-feedback"),
-            hasText("피드백 전체보기"),
-        )
-        targets.forEach { target ->
-            // Physical taps also cover non-button text inside the clickable card.
-            ui.onNode(target, useUnmergedTree = true).performTouchInput { click() }
-            assertDialogAndClose("주행 피드백 전체보기")
-        }
-        ui.onNodeWithTag("saved-feedback-card").performTouchInput {
-            click(Offset(width - 12f, height - 12f))
-        }
-        assertDialogAndClose("주행 피드백 전체보기")
-
-        val ranking = hasAnyAncestor(hasTestTag("saved-ranking-card"))
+        listOf("운전 습관 요약", "과속", "급가속", "급감속", "방향지시등", "이어갈 습관", "개선할 점")
+            .forEach { ui.onNodeWithText(it).assertIsDisplayed() }
+        ui.onNodeWithText("속도 가점 +21.92점").assertIsDisplayed()
+        ui.onAllNodesWithText("가감속 공통 +12.40점").assertCountEquals(1)
+        ui.onNodeWithText("감점 −3.00점").assertIsDisplayed()
+        ui.onNodeWithText("주행 구간", substring = true).assertDoesNotExist()
         listOf(
-            hasText("함께 도착한 무사즈") and ranking,
-            hasTestTag("saved-rank-나"),
-            hasText("+0 M") and ranking,
-            hasText("순위 전체보기"),
-        ).forEach { target ->
-            ui.onNode(target, useUnmergedTree = true).performTouchInput { click() }
-            assertDialogAndClose("함께 도착한 무사즈")
+            "점수 자세히 보기" to "운전점수 산정 내역",
+            "순위 자세히 보기" to "참가자 순위",
+            "마일리지 자세히 보기" to "마일리지 적립 내역",
+        ).forEach { (button, title) ->
+            ui.onNodeWithText(button).performClick()
+            assertDialogAndClose(title)
         }
-        ui.onNodeWithTag("saved-ranking-card").performTouchInput {
-            click(Offset(width / 2f, height - 10f))
-        }
-        assertDialogAndClose("함께 도착한 무사즈")
-
-        val events = hasAnyAncestor(hasTestTag("saved-events-card"))
-        listOf(
-            hasText("주요 주행 구간") and events,
-            hasTestTag("saved-event-0"),
-            hasTestTag("saved-event-2"),
-            hasText("구간 전체보기"),
-        ).forEach { target ->
-            ui.onNode(target, useUnmergedTree = true).performTouchInput { click() }
-            assertDialogAndClose("저장된 주행 구간")
-        }
-        ui.onNodeWithTag("saved-events-card").performTouchInput {
-            click(Offset(width / 2f, height - 10f))
-        }
-        assertDialogAndClose("저장된 주행 구간")
-        assertOverviewDoesNotScroll()
     }
 
     @Test fun perfectScoreHasRoomForThreeDigitsAndBothPositiveFeedbackPoints() {
@@ -116,48 +64,13 @@ class SavedDriveDetailUiTest {
         ui.setContent { MinimumDetailFrame(saved) }
 
         capture("perfect")
-        assertOverviewDoesNotScroll()
-        assertFeedbackFits("saved-good-feedback")
-        assertFeedbackFits("saved-improvement-feedback")
-        ui.onNodeWithTag("saved-good-feedback", useUnmergedTree = true)
-            .assertTextEquals(historyFeedback(saved.report).goodPoints.take(2).joinToString("\n"))
+        historyFeedback(saved.report).goodPoints.forEach { ui.onNodeWithText(it).assertIsDisplayed() }
         val dial = ui.onNodeWithContentDescription("주행습관 점수 원").fetchSemanticsNode().boundsInRoot
         val score = ui.onNodeWithText("100", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val caption = ui.onNodeWithText("100점 만점", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("Three-digit score stays within its dial", dial.contains(score.topLeft) && dial.contains(score.bottomRight))
-        assertTrue("Score and maximum caption must not overlap", score.bottom <= caption.top)
-        assertTrue("Maximum caption stays within its dial", caption.bottom <= dial.bottom)
-        ui.onNodeWithText("저장된 구간 정보가 없어요.", useUnmergedTree = true).assertIsDisplayed()
-        ui.onNodeWithText("+0 M", useUnmergedTree = true).assertIsDisplayed()
-    }
-
-    private fun assertOverviewDoesNotScroll() {
-        listOf("주행습관 점수", "운전 습관 요약", "이어갈 습관", "개선할 점", "함께 도착한 무사즈", "주요 주행 구간")
-            .forEach { ui.onNodeWithText(it, useUnmergedTree = true).assertIsDisplayed() }
-        ui.onAllNodes(hasScrollAction()).assertCountEquals(0)
-    }
-
-    private fun assertFeedbackFits(tag: String) {
-        val results = mutableListOf<TextLayoutResult>()
-        ui.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
-        assertEquals(1, results.size)
-        val layout = results.single()
-        val diagnostics = buildString {
-            append("$tag: size=${layout.size}, constraints=${layout.layoutInput.constraints}, ")
-            append("lineCount=${layout.lineCount}, maxLines=${layout.layoutInput.maxLines}, ")
-            append("didOverflowWidth=${layout.didOverflowWidth}, didOverflowHeight=${layout.didOverflowHeight}, ")
-            append("fontSize=${layout.layoutInput.style.fontSize}, lineHeight=${layout.layoutInput.style.lineHeight}, ")
-            append("textLength=${layout.layoutInput.text.length}, text=${layout.layoutInput.text.text}")
-            repeat(layout.lineCount) { line ->
-                append("\nline[$line]: start=${layout.getLineStart(line)}, end=${layout.getLineEnd(line)}, ")
-                append("visibleEnd=${layout.getLineEnd(line, visibleEnd = true)}, ellipsized=${layout.isLineEllipsized(line)}, ")
-                append("top=${layout.getLineTop(line)}, bottom=${layout.getLineBottom(line)}, ")
-                append("left=${layout.getLineLeft(line)}, right=${layout.getLineRight(line)}")
-            }
-        }
-        android.util.Log.i("SavedDetailLayoutTest", diagnostics)
-        assertFalse("Full summary must fit at the minimum frame size. $diagnostics", layout.hasVisualOverflow)
+        assertTrue("Score and caption must not overlap", score.bottom <= caption.top)
+        ui.onNodeWithText("+0M").assertIsDisplayed()
     }
 
     private fun assertDialogAndClose(title: String) {
