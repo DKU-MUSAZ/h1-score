@@ -23,6 +23,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.Density
@@ -115,8 +116,9 @@ class DriveHistoryPersistenceTest {
         val originalPreferences = app.prefs.all.toMap()
         ui.setContent { H1App(vm) }
 
-        ui.onNodeWithText(first.name).performScrollTo().assertIsDisplayed()
-        ui.onNodeWithText(second.name).performScrollTo().assertIsDisplayed().performClick()
+        ui.onNodeWithText(first.name).assertIsDisplayed()
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText(second.name).assertIsDisplayed().performClick()
         ui.runOnIdle {
             assertEquals(second, vm.selectedHistoryRecord)
             assertEquals(Screen.RESULT, vm.screen)
@@ -127,8 +129,8 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText(second.name).assertIsDisplayed()
         ui.onNodeWithText("78").assertIsDisplayed()
 
-        ui.runOnIdle { vm.navigate(Screen.HISTORY) }
-        ui.onNodeWithText(first.name).performScrollTo().performClick()
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()); vm.navigate(Screen.HISTORY) }
+        ui.onNodeWithText(first.name).performClick()
         ui.runOnIdle { assertEquals(first, vm.selectedHistoryRecord) }
         ui.onNodeWithText(first.name).assertIsDisplayed()
         ui.onNodeWithText("91").assertIsDisplayed()
@@ -143,15 +145,28 @@ class DriveHistoryPersistenceTest {
         val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
         val originalPreferences = app.prefs.all.toMap()
         val originalRecords = vm.completedDrives.toList()
-        ui.setContent { H1App(vm) }
+        ui.setContent {
+            LaunchedEffect(vm) { while (true) { vm.receiveVehicle(parkedVehicle()); delay(200) } }
+            H1App(vm)
+        }
 
-        ui.onNodeWithText("주행일 2026.11.11 08:35").assertIsDisplayed()
-        ui.onNodeWithText("주행일 2026.11.11 09:10").assertIsDisplayed()
+        val dates = listOf("2026.11.11 08:35", "2026.11.11 09:10")
+        val dateHeader = ui.onNodeWithText("주행일").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        dates.forEach {
+            val cell = ui.onNodeWithText(it, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals(dateHeader.left, cell.left, 1f)
+        }
+        ui.onNodeWithText("목적지").assertIsDisplayed()
+        ui.onNodeWithText("주행거리").assertIsDisplayed()
+        val score = ui.onNodeWithText("78", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(score.left > dateHeader.right)
+        ui.onNodeWithText("시연", substring = true).assertDoesNotExist()
         ui.onNodeWithText("최신순").assertIsSelected()
         assertHistoryAbove(second, first)
 
-        ui.onNodeWithText("오래된순").performClick().assertIsSelected()
+        selectHistoryOrder("오래된순")
         assertHistoryAbove(first, second)
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText(first.name).performClick()
         ui.runOnIdle {
             assertEquals(first, vm.selectedHistoryRecord)
@@ -160,13 +175,194 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText(first.name).assertIsDisplayed()
         ui.onNodeWithText("91").assertIsDisplayed()
 
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText("내 기록").performClick()
         ui.onNodeWithText("오래된순").assertIsSelected()
         assertHistoryAbove(first, second)
-        ui.onNodeWithText("최신순").performClick().assertIsSelected()
+        selectHistoryOrder("최신순")
         assertHistoryAbove(second, first)
         ui.runOnIdle { assertEquals(originalRecords, vm.completedDrives) }
         assertEquals(originalPreferences, app.prefs.all)
+    }
+
+    @Test fun weeklyListResetsDayAndFollowsDisplayedWeekWithoutChangingSavedData() {
+        val app = application()
+        val a = drive("wednesday", Instant.parse("2026-11-11T00:10:00Z").toEpochMilli(), false, 95)
+        val b = drive("friday", Instant.parse("2026-11-13T00:10:00Z").toEpochMilli(), false, 89)
+        val previous = drive("previous-sunday", Instant.parse("2026-11-08T00:10:00Z").toEpochMilli(), false, 97)
+        val unknown = drive("undated", null)
+        CompletedDriveStore(app.prefs).apply { listOf(a, b, previous, unknown).forEach(::save) }
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val original = app.prefs.all.toMap()
+        ui.setContent {
+            LaunchedEffect(vm) { while (true) { vm.receiveVehicle(parkedVehicle()); delay(200) } }
+            MinimumHistoryFrame(vm)
+        }
+        ui.onNodeWithText("이 주 기록 · 2건").assertIsDisplayed()
+        ui.onNodeWithText(previous.name).assertDoesNotExist()
+        ui.onNodeWithText(unknown.name).assertDoesNotExist()
+        ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
+        ui.onNodeWithText(a.name).assertIsDisplayed()
+        ui.onNodeWithText(b.name).assertDoesNotExist()
+        captureHistoryExample("day-selected")
+        ui.onNodeWithText("이 주 전체 보기").performClick()
+        ui.onNodeWithText("이 주 기록 · 2건").assertIsDisplayed()
+        ui.onNodeWithText(b.name).assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 11일").assertIsNotSelected()
+        ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
+        ui.onNodeWithTag("history-week-strip").performTouchInput { swipeRight(startX = width * .25f, endX = width * .75f) }
+        ui.onNodeWithText("이 주 기록 · 1건").assertIsDisplayed()
+        ui.onNodeWithText("이 주 전체 보기").assertDoesNotExist()
+        ui.onNodeWithText(previous.name).assertIsDisplayed()
+        ui.onNodeWithContentDescription("다음 주").performClick()
+        ui.onNodeWithText("이 주 기록 · 2건").assertIsDisplayed()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithContentDescription("2026년 11월 8일").performClick()
+        ui.onNodeWithContentDescription("2026년 11월 8일").assertIsSelected()
+        ui.onNodeWithText(previous.name).assertIsDisplayed()
+        ui.onNodeWithText("이 주 전체 보기").performClick()
+        ui.onNodeWithText("이 주 기록 · 1건").assertIsDisplayed()
+        assertEquals(original, app.prefs.all)
+    }
+
+    @Test fun transitioningCalendarHidesListInteractionAndFitsThreeScores() {
+        val app = application()
+        val time = Instant.parse("2026-11-11T00:10:00Z").toEpochMilli()
+        CompletedDriveStore(app.prefs).apply {
+            save(drive("a", time, false, 95)); save(drive("b", time + 1000, false, 89)); save(drive("c", time + 2000, false, 80))
+            val august = Instant.parse("2026-08-15T00:10:00Z").toEpochMilli()
+            save(drive("d", august, false, 95)); save(drive("e", august + 1000, false, 89)); save(drive("f", august + 2000, false, 80))
+        }
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        ui.setContent {
+            LaunchedEffect(vm) { while (true) { vm.receiveVehicle(parkedVehicle()); delay(200) } }
+            MinimumHistoryFrame(vm)
+        }
+        ui.mainClock.autoAdvance = false
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.mainClock.advanceTimeBy(240)
+        ui.onNodeWithTag("history-record-list").assertDoesNotExist()
+        captureHistoryExample("month-transition")
+        ui.mainClock.advanceTimeBy(600)
+        ui.onNodeWithText("95 · 89점\n외 1경기", useUnmergedTree = true).assertIsDisplayed()
+        captureHistoryExample("month-compact")
+        ui.mainClock.autoAdvance = true
+        repeat(3) { ui.onNodeWithContentDescription("이전 달").performClick() }
+        ui.onNodeWithText("2026년 8월").assertIsDisplayed()
+        ui.onNodeWithText("95 · 89점\n외 1경기", useUnmergedTree = true).assertIsDisplayed()
+        captureHistoryExample("month-six-weeks")
+        ui.onNodeWithTag("history-view-week").performClick()
+        ui.onNodeWithText("2026년 11월 9일 – 11월 15일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 7일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 17일").assertIsDisplayed()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithTag("history-view-week").performClick()
+        ui.onNodeWithTag("history-week-strip").assertIsDisplayed()
+    }
+
+    @Test fun monthCalendarSelectsDayRestoresWheelAndKeepsAllRecords() {
+        val app = application()
+        val a = drive("morning", Instant.parse("2026-11-11T00:10:00Z").toEpochMilli(), false, 95)
+        val b = drive("evening", Instant.parse("2026-11-11T09:10:00Z").toEpochMilli(), false, 89)
+        val october = drive("october", Instant.parse("2026-10-31T00:10:00Z").toEpochMilli(), false, 0)
+        val legacy = drive("undated", null)
+        CompletedDriveStore(app.prefs).apply { listOf(a,b,october,legacy).forEach(::save) }
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val original = app.prefs.all.toMap()
+        ui.setContent {
+            LaunchedEffect(vm) { while (true) { vm.receiveVehicle(parkedVehicle()); delay(200) } }
+            H1App(vm)
+        }
+        ui.onNodeWithTag("history-view-week").assertIsSelected()
+        val fixedControl = ui.onNodeWithTag("history-view-month").fetchSemanticsNode().boundsInRoot
+        ui.onNodeWithContentDescription("2026년 11월 7일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 17일").assertIsDisplayed()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithTag("history-month-grid").assertIsDisplayed()
+        ui.onNodeWithTag("history-view-month").assertIsSelected()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithTag("history-month-grid").assertIsDisplayed()
+        assertEquals(fixedControl, ui.onNodeWithTag("history-view-month").fetchSemanticsNode().boundsInRoot)
+        ui.onNodeWithTag("history-record-list").assertDoesNotExist()
+        ui.onNodeWithText("95 · 89점", useUnmergedTree = true).assertIsDisplayed()
+        captureHistoryExample("month")
+        ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
+        ui.onNodeWithTag("history-month-grid").assertDoesNotExist()
+        ui.onNodeWithTag("history-view-week").assertIsSelected()
+        ui.onNodeWithTag("history-view-week").performClick()
+        ui.onNodeWithTag("history-week-strip").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
+        ui.onNodeWithContentDescription("2026년 11월 7일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 17일").assertIsDisplayed()
+        assertHistoryAbove(b, a)
+        captureHistoryExample("month-selected-week")
+        ui.onNodeWithText(a.name).performClick()
+        ui.onNodeWithText("내 기록").performClick()
+        ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithContentDescription("이전 달").performClick()
+        ui.onNodeWithText("2026년 10월").assertIsDisplayed()
+        ui.onNodeWithText("0점", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 10월 31일").performClick()
+        ui.onNodeWithText("2026년 10월 26일 – 11월 1일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 10월 31일").assertIsSelected()
+        ui.onNodeWithText(october.name).assertIsDisplayed()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithText("2026년 10월").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 10월 30일").performClick()
+        ui.onNodeWithText("이날은 주행 기록이 없어요").assertIsDisplayed()
+        ui.onNodeWithTag("history-sort").performClick()
+        ui.onNodeWithText("전체 기록").assertDoesNotExist()
+        ui.onNodeWithText("정렬 기준").assertIsDisplayed()
+        assertEquals(original, app.prefs.all)
+    }
+
+    @Test fun demoHistoryExamplesOpenWithoutChangingSavedRecordsOrRewards() {
+        val app = application()
+        val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
+        val original = app.prefs.all.toMap()
+        ui.setContent { H1App(vm) }
+
+        ui.onNodeWithText("예시 기록", substring = true).assertDoesNotExist()
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()); vm.switchSource(); vm.navigate(Screen.HISTORY) }
+        ui.onNodeWithText("여의도한강공원").assertIsDisplayed()
+        captureHistoryExample("list")
+        ui.onNodeWithTag("history-sort").performClick()
+        ui.onNodeWithTag("history-sort-menu").assertIsDisplayed()
+        ui.waitForIdle()
+        captureHistoryExample("sort-menu")
+        ui.onNode(hasText("최신순") and hasAnyAncestor(isPopup())).performClick()
+        ui.onNodeWithTag("history-view-month").performClick()
+        ui.onNodeWithTag("history-month-grid").assertIsDisplayed()
+        ui.waitForIdle()
+        captureHistoryExample("month-demo")
+        ui.onNodeWithTag("history-view-week").performClick()
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText("여의도한강공원").performClick()
+        ui.onNodeWithText("예시 기록", substring = true).assertIsDisplayed()
+        ui.onNodeWithText("95").assertIsDisplayed()
+        val score = ui.onNodeWithContentDescription("주행습관 점수 원").fetchSemanticsNode().boundsInRoot
+        val metric = ui.onNodeWithText("1,133 m").fetchSemanticsNode().boundsInRoot
+        val good = ui.onNodeWithText("이어갈 습관").fetchSemanticsNode().boundsInRoot
+        val improve = ui.onNodeWithText("개선할 점").fetchSemanticsNode().boundsInRoot
+        assertTrue(metric.left > score.right)
+        assertTrue(good.top > score.bottom)
+        assertTrue(improve.top > good.bottom)
+        captureHistoryExample("detail")
+        ui.onNodeWithText("마일리지 자세히 보기").performClick()
+        dialogText("마일리지 적립 내역").assertIsDisplayed()
+        dialogText("순위 보상 +100M · 배지 보상 +15M").assertIsDisplayed()
+        ui.onNodeWithContentDescription("닫기").performClick()
+        ui.runOnIdle {
+            assertTrue(vm.completedDrives.isEmpty())
+            assertEquals(0, vm.balance)
+            assertEquals(original, app.prefs.all)
+            vm.receiveVehicle(parkedVehicle())
+            vm.switchSource()
+            vm.navigate(Screen.HISTORY)
+        }
+        ui.onNodeWithText("첫 드라이브를 기다리고 있어요").assertIsDisplayed()
+        ui.onNodeWithText("여의도한강공원").assertDoesNotExist()
     }
 
     @Test fun calendarFiltersDaysAndPreservesSortDetailSelectionAndSavedData() {
@@ -181,21 +377,31 @@ class DriveHistoryPersistenceTest {
         val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); navigate(Screen.HISTORY) } }
         val originalPreferences = app.prefs.all.toMap()
         val originalRecords = vm.completedDrives.toList()
-        ui.setContent { H1App(vm) }
+        ui.setContent {
+            LaunchedEffect(vm) { while (true) { vm.receiveVehicle(parkedVehicle()); delay(200) } }
+            H1App(vm)
+        }
 
-        ui.onNodeWithText("2026년 11월").assertIsDisplayed()
+        ui.onNodeWithText("2026년 11월 9일 – 11월 15일").assertIsDisplayed()
+        val previousEdge = ui.onNodeWithContentDescription("2026년 11월 7일").assertIsDisplayed()
+        val nextEdge = ui.onNodeWithContentDescription("2026년 11월 17일").assertIsDisplayed()
+        val middle = ui.onNodeWithContentDescription("2026년 11월 12일").fetchSemanticsNode().boundsInRoot
+        assertEquals(middle.center.y, previousEdge.fetchSemanticsNode().boundsInRoot.center.y, 1f)
+        assertEquals(middle.center.y, nextEdge.fetchSemanticsNode().boundsInRoot.center.y, 1f)
         ui.onNodeWithContentDescription("2026년 11월 11일").performClick().assertIsSelected()
         assertHistoryAbove(second, first)
         ui.onNodeWithText(otherDay.name).assertDoesNotExist()
         ui.onNodeWithText(priorMonth.name).assertDoesNotExist()
         ui.onNodeWithText(unknown.name).assertDoesNotExist()
-        ui.onNodeWithText("오래된순").performClick().assertIsSelected()
+        selectHistoryOrder("오래된순")
         assertHistoryAbove(first, second)
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText(first.name).performClick()
         ui.onNodeWithText(first.name).assertIsDisplayed()
         ui.onNodeWithText("91").assertIsDisplayed()
         ui.runOnIdle { assertEquals(first, vm.selectedHistoryRecord) }
 
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText("내 기록").performClick()
         ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
         ui.onNodeWithText("오래된순").assertIsSelected()
@@ -204,18 +410,23 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText("이날은 주행 기록이 없어요").assertIsDisplayed()
         saved.forEach { ui.onNodeWithText(it.name).assertDoesNotExist() }
 
-        ui.onNodeWithContentDescription("이전 달").performClick()
-        ui.onNodeWithText("2026년 10월").assertIsDisplayed()
+        val calendar = ui.onNodeWithTag("history-week-strip")
+        calendar.performTouchInput { swipeRight(startX = width * .25f, endX = width * .75f) }
+        ui.onNodeWithText("2026년 11월 2일 – 11월 8일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("이전 주").performClick()
         ui.onNodeWithContentDescription("2026년 10월 31일").performClick().assertIsSelected()
         ui.onNodeWithText(priorMonth.name).assertIsDisplayed()
         ui.onNodeWithText("이날은 주행 기록이 없어요").assertDoesNotExist()
         ui.onNodeWithText(first.name).assertDoesNotExist()
-        ui.onNodeWithContentDescription("다음 달").performClick()
-        ui.onNodeWithText("2026년 11월").assertIsDisplayed()
+        calendar.performTouchInput { swipeLeft(startX = width * .75f, endX = width * .25f) }
+        ui.onNodeWithText("2026년 11월 2일 – 11월 8일").assertIsDisplayed()
+        ui.onNodeWithContentDescription("2026년 11월 10일").performClick().assertIsSelected()
+        ui.onNodeWithText("2026년 11월 9일 – 11월 15일").assertIsDisplayed()
+        ui.onNodeWithText(otherDay.name).assertIsDisplayed()
 
-        ui.onNodeWithText("전체 기록").performClick()
-        saved.forEach { ui.onNodeWithText(it.name).performScrollTo().assertIsDisplayed() }
-        ui.onNodeWithText("주행 날짜 미상").assertIsDisplayed()
+        ui.onNodeWithTag("history-sort").performClick()
+        ui.onNodeWithText("전체 기록").assertDoesNotExist()
+        ui.onNodeWithText("정렬 기준").assertIsDisplayed()
         ui.runOnIdle { assertEquals(originalRecords, vm.completedDrives) }
         assertEquals(originalPreferences, app.prefs.all)
     }
@@ -224,7 +435,7 @@ class DriveHistoryPersistenceTest {
         val app = application()
         val saved = drive("feedback", 1_000L, false, 91)
         CompletedDriveStore(app.prefs).save(saved)
-        app.prefs.edit().putInt("balance", 140).commit()
+        app.prefs.edit().putInt("balance-live", 140).commit()
         val vm = ui.runOnIdle { model(app).apply { receiveVehicle(parkedVehicle()); openCompletedResult() } }
         val originalPreferences = app.prefs.all.toMap()
         val originalSession = vm.session
@@ -242,8 +453,11 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText("이어갈 습관").assertDoesNotExist()
         ui.onNodeWithText("개선할 점").assertDoesNotExist()
 
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithText("내 기록").performClick()
-        ui.onNodeWithText(saved.name).performScrollTo().performClick()
+        ui.onNodeWithTag("history-record-list").performScrollToNode(hasText(saved.name))
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText(saved.name).performClick()
         ui.onNodeWithText("운전 습관 요약").assertIsDisplayed()
         ui.onNodeWithText("이번 주행 피드백").assertDoesNotExist()
         ui.onNodeWithText("91").assertIsDisplayed()
@@ -302,10 +516,12 @@ class DriveHistoryPersistenceTest {
         }
 
         ui.onNodeWithContentDescription("2026년 11월 11일").performClick()
-        ui.onNodeWithText("오래된순").performClick()
-        ui.onNodeWithText(saved.name).performClick()
+        selectHistoryOrder("오래된순")
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText(saved.name).performSemanticsAction(SemanticsActions.OnClick)
+        ui.runOnIdle { assertEquals(saved, vm.selectedHistoryRecord) }
         assertSavedOverviewVisible()
-        ui.onNodeWithText("이번 적립 +0M", substring = true).assertIsDisplayed()
+        ui.onNodeWithText("+0M", substring = true).assertIsDisplayed()
         ui.onNodeWithText("+80 M").assertDoesNotExist()
         ui.onNodeWithText("공동 1위", substring = true).assertIsDisplayed()
         ui.onNodeWithText("9분 0초", substring = true).assertDoesNotExist()
@@ -317,12 +533,7 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithContentDescription("닫기").performClick()
         assertSavedOverviewVisible()
 
-        ui.onNodeWithText("주행 구간 10건 보기").performClick()
-        dialogText("저장된 주행 구간").assertIsDisplayed()
-        dialogText("저장된 구간 10건").assertIsDisplayed()
-        dialogText("9분 0초", substring = true).performScrollTo().assertIsDisplayed()
-        ui.onNodeWithContentDescription("닫기").performClick()
-        assertSavedOverviewVisible()
+        ui.onNodeWithText("주행 구간 10건 보기").assertDoesNotExist()
 
         ui.onNodeWithText("순위 자세히 보기").performClick()
         dialogText("참가자 순위").assertIsDisplayed()
@@ -342,7 +553,10 @@ class DriveHistoryPersistenceTest {
             assertNull(vm.report)
         }
 
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
         ui.onNodeWithContentDescription("기록 목록으로").performClick()
+        ui.runOnIdle { assertEquals(Screen.HISTORY, vm.screen) }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("history-week-strip").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithContentDescription("2026년 11월 11일").assertIsSelected()
         ui.onNodeWithText("오래된순").assertIsSelected()
         ui.onNodeWithText(saved.name).assertIsDisplayed()
@@ -407,9 +621,28 @@ class DriveHistoryPersistenceTest {
     }
 
     private fun assertHistoryAbove(above: CompletedDrive, below: CompletedDrive) {
+        // Dropdown dismissal can finish before the lazy list's placement frame.
+        ui.waitUntil(3_000) {
+            ui.onNodeWithText(above.name).fetchSemanticsNode().boundsInRoot.top <
+                ui.onNodeWithText(below.name).fetchSemanticsNode().boundsInRoot.top
+        }
         val first = ui.onNodeWithText(above.name).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val second = ui.onNodeWithText(below.name).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("${above.name} should appear before ${below.name}", first.top < second.top)
+        assertTrue("${above.name} $first should appear before ${below.name} $second", first.top < second.top)
+    }
+
+    private fun selectHistoryOrder(label: String) {
+        ui.onNodeWithTag("history-sort").performClick()
+        ui.onNodeWithText(label).performClick()
+        ui.onNodeWithText(label).assertIsSelected()
+    }
+
+    private fun captureHistoryExample(section: String) {
+        val screenshot = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        ui.activity.filesDir.resolve("history-example-$section.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        screenshot.recycle()
     }
 
     private fun assertSavedOverviewVisible() {
