@@ -19,6 +19,8 @@ internal fun historyFeedback(report: ScoreReport): HistoryFeedback {
     val decelerations = report.recordedDecelerations
     val longitudinalPending = bonus && !report.longitudinalReady
     val overDistance = historyFeedbackDistance(report.overLimitDistanceM)
+    val signalIssues = report.turns.count { it.verdict == TurnVerdict.UNUSED || it.verdict == TurnVerdict.MISMATCHED }
+    val verifiedTurns = report.turns.count { it.verdict != TurnVerdict.UNVERIFIABLE }
     val metrics = listOf(
         HistoryFeedbackMetric("과속", overDistance, "제한속도 초과 거리"),
         HistoryFeedbackMetric("급가속", if (longitudinalPending && report.accelerationEvents == 0) "판정 보류" else "${report.accelerationEvents}회",
@@ -29,6 +31,9 @@ internal fun historyFeedback(report: ScoreReport): HistoryFeedback {
             longitudinalPending -> "판정 보류"
             else -> "확인 내역 없음"
         }, if (bonus) "해당 구간 가점 제외" else "저장된 구간 · 감점 제외"),
+        HistoryFeedbackMetric("방향지시등",
+            if (verifiedTurns == 0) "판정 없음" else "${signalIssues}건",
+            "미사용·반대 방향"),
     )
     val good = buildList {
         if (report.score != null && report.validDistanceM > 0 && (!bonus || report.longitudinalReady)) {

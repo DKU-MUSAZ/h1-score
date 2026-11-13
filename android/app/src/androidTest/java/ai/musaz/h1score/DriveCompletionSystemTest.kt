@@ -33,11 +33,13 @@ class DriveCompletionSystemTest {
     private var backupReady=false
     private var priorSetup=false
     private var priorResult:String?=null
+    private var priorHistory:String?=null
     @Before fun preserveUserSetup() {
         assumeTrue("Pleos device integration is opt-in", InstrumentationRegistry.getArguments().getString("liveDevice")=="true")
         val p=app.getSharedPreferences("h1-demo-v1",0)
         priorSetup=p.getBoolean("first-run-complete-v1",false)
         priorResult=p.getString("last-completed-drive-v1",null)
+        priorHistory=p.getString("completed-drives-v1",null)
         backupReady=true
         val accessibility=instrumentation.uiAutomation.serviceInfo
         accessibility.flags=accessibility.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
@@ -48,6 +50,7 @@ class DriveCompletionSystemTest {
         if(!backupReady) return
         app.getSharedPreferences("h1-demo-v1",0).edit().putBoolean("first-run-complete-v1",priorSetup).apply {
             if(priorResult==null) remove("last-completed-drive-v1") else putString("last-completed-drive-v1",priorResult)
+            if(priorHistory==null) remove("completed-drives-v1") else putString("completed-drives-v1",priorHistory)
         }.commit()
     }
     private fun main(block: () -> Unit) = instrumentation.runOnMainSync(block)
@@ -66,7 +69,7 @@ class DriveCompletionSystemTest {
         RecordingService.clearResult(app)
         val manager = app.getSystemService(NotificationManager::class.java)
         val route = LiveVehicle(destination="알림 검증 · 여의도", destinationId="notification-test",
-            destinationPoint=hangangVenue, remainingM=900.0, destinationAt=SystemClock.elapsedRealtime(),
+            destinationPoint=hangangVenue, remainingM=10_001.0, destinationAt=SystemClock.elapsedRealtime(),
             speedMps=0.0, speedAt=SystemClock.elapsedRealtime(), gearPark=true, uxRestricted=false, belt=true, beltAt=SystemClock.elapsedRealtime())
         main {
             vm.connection.stop()
@@ -74,13 +77,19 @@ class DriveCompletionSystemTest {
             if (vm.activeJourney) vm.cancel()
             if (vm.demo) vm.switchSource()
             vm.accept(ChallengeRound("알림 검증", Instant.now().minusSeconds(60), Instant.now().plusSeconds(600)))
-            assertTrue(vm.activeJourney)
+            assertEquals(Phase.RESERVED, vm.phase)
+            assertEquals(0, vm.session?.startCount)
         }
         main { vm.leaveForeground() }
         SystemClock.sleep(1000)
         main {
             vm.connection.stop()
-            vm.receiveVehicle(route.copy(arrived=true, arrivedAt=Instant.now(), gearPark=false))
+            val threshold = route.copy(remainingM=10_000.0, destinationAt=SystemClock.elapsedRealtime(), gearPark=false)
+            vm.receiveVehicle(threshold)
+            assertEquals(Phase.RECORDING, vm.phase)
+            vm.receiveVehicle(threshold.copy(remainingM=9_999.0))
+            assertEquals(1, vm.session?.startCount)
+            vm.receiveVehicle(threshold.copy(arrived=true, arrivedAt=Instant.now()))
             assertEquals(Phase.AWAITING_PARK, vm.phase)
         }
         assertFalse(manager.activeNotifications.any { it.id == 11 })
@@ -118,11 +127,10 @@ class DriveCompletionSystemTest {
         main {connection.start()}
         waitFor("NaviHelper did not connect") { connection.flow.value.statuses["NaviHelper"]?.contains("연결됨") == true || connection.flow.value.statuses["NaviHelper"]?.contains("목적지 수신") == true }
         main { assertTrue(connection.openNavigation(true, "서울역")) }
-        assertTrue(device.wait(Until.hasObject(By.pkg("ai.umos.maps.android.navigation.app").depth(0)), 15_000))
-        SystemClock.sleep(5000)
+        val searchResult = By.pkg("ai.umos.maps.android.navigation.app").textContains("서울역")
+        assertTrue("Native search must receive the original keyword", device.wait(Until.hasObject(searchResult), 15_000))
         device.dumpWindowHierarchy(File(app.filesDir,"native-search.xml"))
         device.takeScreenshot(File(app.filesDir,"native-search.png"))
-        assertTrue("Native search must receive the original keyword", device.hasObject(By.textContains("서울역")))
     }
 
     @Test fun pleosSpeechProducesPlaybackCallbacks() {
@@ -144,7 +152,7 @@ class DriveCompletionSystemTest {
                 override fun onFailure(errorType: ErrorType) { events += "init-error:${errorType.name}"; initialized.countDown() }
             }) }
             assertTrue("TTS initialization timeout", initialized.await(20, TimeUnit.SECONDS))
-            main { engine.addEventListener(listener); engine.speak("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.", true) }
+            main { engine.addEventListener(listener); engine.speak("마지막 십 킬로미터입니다. 무사즈 기록을 시작해요.", true) }
             assertTrue("TTS playback timeout: $events", done.await(30, TimeUnit.SECONDS))
             assertTrue("No playback start: $events", "start" in events)
             assertTrue("No successful completion: $events", "done" in events)

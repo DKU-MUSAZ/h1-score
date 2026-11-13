@@ -10,11 +10,11 @@ import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.junit.Assert.assertEquals
@@ -25,7 +25,6 @@ import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
 import java.util.UUID
-import kotlinx.coroutines.delay
 
 class CollectionRecordingTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
@@ -125,10 +124,12 @@ class CollectionRecordingTest {
     }
 
     @Test fun customShortcutEditorAddsSchoolAndRequiresRealPlace() {
-        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime())); switchSource() } }
-        ui.setContent { MaterialTheme { DestinationShortcutEditor(vm,null) {} } }
-        ui.onNodeWithText("새 바로가기 이름").performTextInput("학교")
-        ui.onNodeWithText("바로가기 추가").performClick()
+        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle()); switchSource() } }
+        var editorOpen by mutableStateOf(true)
+        ui.setContent { MaterialTheme { if (editorOpen) DestinationShortcutEditor(vm, null) { editorOpen = false } } }
+        ui.onNode(hasSetTextAction()).performTextReplacement("학교")
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText("바로가기 추가").performSemanticsAction(SemanticsActions.OnClick)
         ui.onNodeWithText("학교 목적지").assertExists()
         val screenshot=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         java.io.File(ui.activity.filesDir, "shortcut-editor.png").outputStream().use {
@@ -136,10 +137,11 @@ class CollectionRecordingTest {
         }
         screenshot.recycle()
         ui.onNodeWithText("저장").assertIsNotEnabled()
-        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime(),destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
         ui.waitUntil(3000) { ui.onAllNodesWithText("현재 내비 목적지 선택: 서울역").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performClick()
-        ui.onNodeWithText("저장").performClick()
+        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        ui.runOnIdle { vm.receiveVehicle(vm.live.copy(speedAt = SystemClock.elapsedRealtime())) }
+        ui.onNodeWithText("저장").performSemanticsAction(SemanticsActions.OnClick)
         ui.runOnIdle { assertEquals("서울역",vm.destinationShortcuts.single {it.label=="학교"}.place?.name) }
     }
 
@@ -147,7 +149,7 @@ class CollectionRecordingTest {
         val app = isolatedApplication()
         val model = ui.runOnIdle {
             ChallengeViewModel(app).apply {
-                receiveVehicle(parkedVehicle().copy(speedAt = SystemClock.elapsedRealtime()))
+                receiveVehicle(parkedVehicle())
                 switchSource()
             }
         }
@@ -195,23 +197,42 @@ class CollectionRecordingTest {
         }
     }
 
+    @Test fun eligibleNavigationDestinationOffersChallengeOnce() {
+        val app = isolatedApplication()
+        val model = ui.runOnIdle { ChallengeViewModel(app).apply { receiveVehicle(parkedVehicle()) } }
+        ui.setContent { H1App(model) }
+
+        fun route(id: String, name: String, point: ai.musaz.h1score.core.GeoPoint) = parkedVehicle().copy(
+            destination = name,
+            destinationId = id,
+            destinationPoint = point,
+            destinationAt = SystemClock.elapsedRealtime(),
+            remainingM = 12_000.0
+        )
+        val eligible = route("near", "더현대서울", ai.musaz.h1score.core.GeoPoint(37.5259, 126.9284))
+        val outside = route("far", "서울역", ai.musaz.h1score.core.GeoPoint(37.5547, 126.9707))
+        val invitation = ui.onNodeWithText("내비 목적지 · 더현대서울")
+
+        ui.runOnIdle { model.receiveVehicle(eligible.copy(speedAt = SystemClock.elapsedRealtime())) }
+        invitation.assertIsDisplayed()
+        ui.onNodeWithContentDescription("닫기").performClick()
+        ui.runOnIdle { model.receiveVehicle(eligible.copy(remainingM = 11_900.0)) }
+        invitation.assertDoesNotExist()
+
+        ui.runOnIdle { model.receiveVehicle(outside) }
+        ui.onNodeWithText("내비 목적지 · 서울역").assertDoesNotExist()
+        ui.runOnIdle { model.receiveVehicle(eligible.copy(speedAt = SystemClock.elapsedRealtime())) }
+        invitation.assertIsDisplayed()
+        ui.onNodeWithText("현재 목적지로 챌린지 참가").assertDoesNotExist()
+    }
+
     @Test fun mileageCardsPreserveBalanceAndHeadersAreNotDuplicated() {
         val app=isolatedApplication()
         app.prefs.edit().putInt("balance",100).commit()
         val model=ui.runOnIdle { ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime()));switchSource();navigate(Screen.WALLET)
+            receiveVehicle(parkedVehicle());switchSource();navigate(Screen.WALLET)
         } }
-        ui.setContent {
-            // This long UI flow has no connected vehicle. Keep its simulated parked
-            // input fresh instead of relying on a sample that expires after 2.5 s.
-            LaunchedEffect(model) {
-                while (true) {
-                    model.receiveVehicle(parkedVehicle())
-                    delay(200)
-                }
-            }
-            H1App(model)
-        }
+        ui.setContent { H1App(model) }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
         ui.onNodeWithText("와이퍼",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
@@ -261,8 +282,8 @@ class CollectionRecordingTest {
 
     @Test fun resultFeedbackPersistsAndScoreDialStaysSquare() {
         val app=isolatedApplication()
-        val report=ai.musaz.h1score.core.ScoreEngine.evaluate((0..7000).map {
-            ai.musaz.h1score.core.Sample(it*100L,when(it) {in 1000..1010->25.0;in 1011..1020->15.0;else->20.0},80)
+        val report=ai.musaz.h1score.core.ScoreEngine.evaluate((0..5_000).map { index ->
+            ai.musaz.h1score.core.Sample(index * 100L, if (index in 1_000..1_100) 25.0 else 20.0, 80)
         })
         val store=CompletedDriveStore(app.prefs)
         store.save(CompletedDrive(
@@ -270,7 +291,7 @@ class CollectionRecordingTest {
             report,"피드백 테스트",true,listOf(ai.musaz.h1score.core.RankedEntry("나",report.score!!,1,0)),0,false))
         assertEquals(report,store.read()!!.report)
         val model=ui.runOnIdle {ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle().copy(speedAt=SystemClock.elapsedRealtime()))
+            receiveVehicle(parkedVehicle())
             openCompletedResult()
         }}
         ui.setContent {H1App(model)}
@@ -307,8 +328,9 @@ class CollectionRecordingTest {
         }
     }
 
-    private fun parkedVehicle() = LiveVehicle(speedMps = 0.0, speedAt = SystemClock.elapsedRealtime(),
-        gearPark = true, uxRestricted = false, belt = true, beltAt = SystemClock.elapsedRealtime())
+    private fun parkedVehicle() = SystemClock.elapsedRealtime().let { now ->
+        LiveVehicle(speedMps = 0.0, speedAt = now, gearPark = true, uxRestricted = false, belt = true, beltAt = now)
+    }
 
     private fun isolatedApplication(): RecordingTestApplication =
         RecordingTestApplication(ui.activity.applicationContext)

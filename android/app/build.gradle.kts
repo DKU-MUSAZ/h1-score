@@ -5,9 +5,13 @@ plugins {
     kotlin("android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-val kakaoMapKey = Properties().run {
+val localProperties = Properties().apply {
     rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
-    getProperty("KAKAO_NATIVE_APP_KEY", "").trim()
+}
+val kakaoMapKey = localProperties.getProperty("KAKAO_NATIVE_APP_KEY", "").trim()
+val kakaoLocalKey = localProperties.getProperty("KAKAO_LOCAL_REST_API_KEY", "").trim()
+require(kakaoLocalKey.isEmpty() || kakaoLocalKey.matches(Regex("[0-9a-fA-F]{32}"))) {
+    "KAKAO_LOCAL_REST_API_KEY must be the 32-character Kakao REST API key"
 }
 require(kakaoMapKey.isEmpty() || kakaoMapKey.matches(Regex("[0-9a-fA-F]{32}"))) {
     "KAKAO_NATIVE_APP_KEY must be the 32-character Kakao native app key"
@@ -18,12 +22,18 @@ android {
     compileSdk = 35
     defaultConfig {
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoMapKey\"")
+        buildConfigField("String", "KAKAO_LOCAL_REST_API_KEY", "\"\"")
         applicationId = "ai.musaz.h1score"
         minSdk = 28
         targetSdk = 34
         versionCode = 2
         versionName = "0.2.0-prototype"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        debug {
+            buildConfigField("String", "KAKAO_LOCAL_REST_API_KEY", "\"$kakaoLocalKey\"")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

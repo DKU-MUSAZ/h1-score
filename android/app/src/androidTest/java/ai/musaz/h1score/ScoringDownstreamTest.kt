@@ -53,6 +53,7 @@ class ScoringDownstreamTest {
             assertEquals(Screen.RESULT, vm.screen)
             val day = LocalDate.now(ChallengeRound.seoul)
             assertEquals(95, vm.collectionProgress.weeklyScoreAverage(day))
+            assertEquals(10_000L, vm.recordedDistanceMeters)
             assertEquals(1, vm.collectionProgress.scoreDays(95))
             assertEquals(0, CollectionProgressStore(app.prefs).read(true).challengeDays)
 
@@ -69,6 +70,7 @@ class ScoringDownstreamTest {
             assertEquals(report, restored.report)
             assertEquals(saved, restored.completedDrives)
             assertEquals(95, restored.collectionProgress.weeklyScoreAverage(day))
+            assertEquals(10_000L, restored.recordedDistanceMeters)
             assertEquals(1, restored.collectionProgress.scoreDays(95))
         }
         ui.setContent {
@@ -86,6 +88,8 @@ class ScoringDownstreamTest {
         ui.runOnIdle { restored.navigate(Screen.HOME) }
         ui.onNodeWithText("이번 주 안전점수").assertIsDisplayed()
         ui.onNodeWithText("95점").assertIsDisplayed()
+        ui.onNodeWithText("10.0 km").assertIsDisplayed()
+        captureDownstream("compact-home")
         ui.onNodeWithText("일별 최고점 평균").assertIsDisplayed()
         ui.runOnIdle { restored.navigate(Screen.BADGES) }
         val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
@@ -174,21 +178,24 @@ class ScoringDownstreamTest {
         val referenceDate = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
         val otherDay = if (today.dayOfWeek == DayOfWeek.MONDAY) today.plusDays(1) else today.minusDays(1)
         CollectionProgressStore(app.prefs).saveChallenge(false,
-            CollectionProgress().recordChallenge(otherDay, 100))
+            CollectionProgress().recordChallenge(otherDay, 100).recordChallenge(referenceDate.minusDays(7), 61))
         ui.runOnIdle {
             val vm = model(app)
             assertEquals(95, completeLiveTrip(vm, compliantMeters = 8_750).score)
-            assertEquals(mapOf(otherDay to 100, today to 95), vm.collectionProgress.scoresByDay)
+            assertEquals(mapOf(otherDay to 100, today to 95, referenceDate.minusDays(7) to 61), vm.collectionProgress.scoresByDay)
             assertEquals(98, vm.collectionProgress.weeklyScoreAverage(referenceDate))
             assertEquals(2, vm.collectionProgress.scoreDays(95))
             // Another lower-scoring trip on today's date must not weight the average
             // by trip count or add a third qualifying day to safety badges.
             assertEquals(80, completeLiveTrip(vm, compliantMeters = 5_000).score)
             assertEquals(98, vm.collectionProgress.weeklyScoreAverage(referenceDate))
-            assertEquals(2, vm.collectionProgress.challengeDays)
+            assertEquals(3, vm.collectionProgress.challengeDays)
+            assertEquals(20_000L, vm.recordedDistanceMeters)
+            assertNull(vm.collectionProgress.weeklyScoreAverage(referenceDate.plusDays(1)))
             val restored = model(app)
             assertEquals(vm.collectionProgress, restored.collectionProgress)
             assertEquals(98, restored.collectionProgress.weeklyScoreAverage(referenceDate))
+            assertEquals(20_000L, restored.recordedDistanceMeters)
             assertEquals(2, restored.collectionProgress.scoreDays(95))
         }
     }
@@ -262,7 +269,7 @@ class ScoringDownstreamTest {
             }
             H1App(restored)
         }
-        ui.onNodeWithText("+100 M", useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithText("이번 적립 +100M", substring = true).assertIsDisplayed()
         ui.runOnIdle { restored.navigate(Screen.WALLET) }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
         ui.onNodeWithText("100", useUnmergedTree = true).assertIsDisplayed()
