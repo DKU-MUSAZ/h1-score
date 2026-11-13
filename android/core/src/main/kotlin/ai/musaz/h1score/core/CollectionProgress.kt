@@ -12,6 +12,10 @@ enum class SpotTour(val id: String, val city: String, val location: GeoPoint) {
 
     val destinationName get() = "현대 모터스튜디오 $city"
 
+    companion object {
+        const val REQUIRED_VISITS = 3
+    }
+
     fun matches(name: String?, point: GeoPoint?): Boolean =
         point?.let { location.includes(it, radiusMeters = 150.0) }
             ?: (name?.filter(Char::isLetterOrDigit) == destinationName.filter(Char::isLetterOrDigit))
@@ -45,7 +49,7 @@ data class CollectionProgress(
 
     fun recordVisit(spot: SpotTour, day: LocalDate): CollectionProgress {
         val days = visitsBySpot[spot].orEmpty()
-        if (day in days || days.size >= 3) return this
+        if (day in days || days.size >= SpotTour.REQUIRED_VISITS) return this
         return copy(visitsBySpot = visitsBySpot + (spot to (days + day)))
     }
 }

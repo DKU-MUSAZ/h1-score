@@ -338,6 +338,13 @@ class MileageLedger(initialBalance: Int = 0, initialIds: Set<String> = emptySet(
         balance -= cost
         return true
     }
+    fun creditBadge(id: String, miles: Int): Int {
+        require(miles > 0)
+        if (!settled.add("badge:$id")) return 0
+        balance += miles
+        return miles
+    }
+
     fun credit(id: String, miles: Int, destination: String = id, date: String = "demo"): Int {
         require(miles >= 0)
         if (!settled.add(id)) return 0
