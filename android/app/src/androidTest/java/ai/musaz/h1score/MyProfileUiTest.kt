@@ -67,7 +67,11 @@ class MyProfileUiTest {
                 assertEquals(null, vm.live.belt)
             }
             ui.onNodeWithText("연료 잔량").assertDoesNotExist()
-            ui.onNodeWithText("닉네임 변경").performClick()
+            ui.onNodeWithText("닉네임 변경").assertDoesNotExist()
+            val rename = ui.onNodeWithContentDescription("닉네임 변경").performScrollTo().fetchSemanticsNode().boundsInRoot
+            val tutorial = ui.onNodeWithText("사용법 다시 보기").performScrollTo().fetchSemanticsNode().boundsInRoot
+            assertTrue(rename.bottom < tutorial.top)
+            ui.onNodeWithContentDescription("닉네임 변경").performScrollTo().performClick()
             val input=ui.onNode(hasSetTextAction())
             input.performTextReplacement("   ")
             ui.onNodeWithText("저장").assertIsNotEnabled()

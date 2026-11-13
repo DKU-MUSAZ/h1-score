@@ -2,17 +2,14 @@ package ai.musaz.h1score
 
 import android.os.Build
 import android.os.SystemClock
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.DirectionsCar
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,23 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.res.imageResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.abs
-import kotlin.math.roundToInt
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 
-private val ProfileBlue = Color(0xFFDDEBFA)
 private val ProfileText = Color(0xFF526479)
 private val ProfileWarning = Color(0xFFA62B25)
 
@@ -88,57 +75,13 @@ internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
             .height(IntrinsicSize.Min),
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Column(
-            Modifier.weight(.34f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(
-                Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                    .background(H1Style.Ink).padding(horizontal = 20.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                MusazAvatar()
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    vm.nickname, color = Color.White, fontSize = 28.sp, lineHeight = 32.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(
-                    onClick = { draft = vm.nickname; editing = true },
-                    enabled = enabled,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ProfileBlue, contentColor = H1Style.Ink,
-                        disabledContainerColor = Color.White.copy(alpha = .14f),
-                        disabledContentColor = Color.White.copy(alpha = .6f),
-                    ),
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("닉네임 변경", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            Surface(
-                onClick = { vm.restartTutorial() },
-                enabled = enabled && vm.canChooseDestination && vm.trackedSpot == null,
-                shape = RoundedCornerShape(18.dp),
-                color = Color.White,
-                contentColor = H1Style.Ink,
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 62.dp).padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(Icons.Outlined.HelpOutline, null, tint = ProfileText)
-                    Text("사용법 다시 보기", Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(19.dp), tint = ProfileText)
-                }
-            }
+        Column(Modifier.weight(.34f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ProfileDriverLicense(vm.nickname, enabled, onEditNickname = {
+                draft = vm.nickname
+                editing = true
+            }, modifier = Modifier.weight(1f).fillMaxWidth())
+            ProfileAction("사용법 다시 보기", Icons.Outlined.HelpOutline,
+                enabled && vm.canChooseDestination && vm.trackedSpot == null) { vm.restartTutorial() }
         }
 
         val observedAt = maxOf(now, SystemClock.elapsedRealtime())
@@ -198,20 +141,25 @@ internal fun MyProfileScreen(vm: ChallengeViewModel, enabled: Boolean) {
             trimmed.none { it.isISOControl() }
         AlertDialog(
             onDismissRequest = { editing = false },
+            modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
+            properties = DialogProperties(usePlatformDefaultWidth = false),
             containerColor = Color.White,
-            title = { Text("닉네임 변경", fontWeight = FontWeight.Bold) },
+            title = { Text("닉네임 변경", fontSize = 34.sp, fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     draft, { draft = it }, Modifier.fillMaxWidth(),
-                    singleLine = true, label = { Text("닉네임") },
-                    supportingText = { Text("1~16자로 입력해 주세요") },
+                    textStyle = LocalTextStyle.current.copy(fontSize = 32.sp, lineHeight = 40.sp),
+                    singleLine = true, label = { Text("닉네임", fontSize = 26.sp) },
+                    supportingText = { Text("1~16자로 입력해 주세요", fontSize = 24.sp, lineHeight = 32.sp) },
                     isError = draft.isNotEmpty() && !valid,
                 )
             },
             confirmButton = {
-                Button(enabled = valid, onClick = { if (vm.updateNickname(draft)) editing = false }) { Text("저장") }
+                Button(enabled = valid, modifier = Modifier.widthIn(min = 140.dp).heightIn(min = 64.dp),
+                    onClick = { if (vm.updateNickname(draft)) editing = false }) { Text("저장", fontSize = 26.sp) }
             },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("취소") } },
+            dismissButton = { TextButton(modifier = Modifier.heightIn(min = 64.dp),
+                onClick = { editing = false }) { Text("취소", fontSize = 26.sp) } },
         )
     }
 }
@@ -250,21 +198,15 @@ internal fun openingSummary(states: Map<String, Boolean?>): String? {
 }
 
 @Composable
-private fun MusazAvatar() {
-    val mascot = ImageBitmap.imageResource(R.drawable.musaz_challenge_home)
-    Canvas(
-        Modifier.size(146.dp).clip(CircleShape).background(ProfileBlue)
-            .semantics { contentDescription = "무사즈 프로필 이미지" },
-    ) {
-        // Zoom the existing full-body illustration to frame the helmet and face.
-        val width = (size.width * 2.22f).roundToInt().coerceAtLeast(1)
-        val height = (width * mascot.height.toFloat() / mascot.width).roundToInt().coerceAtLeast(1)
-        drawImage(
-            image = mascot,
-            dstOffset = IntOffset(((size.width - width) / 2).roundToInt(), (size.height * .09f).roundToInt()),
-            dstSize = IntSize(width, height),
-            filterQuality = FilterQuality.High,
-        )
+private fun ProfileAction(label: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(18.dp),
+        color = Color.White, contentColor = H1Style.Ink) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 62.dp).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(icon, null, tint = ProfileText)
+            Text(label, Modifier.weight(1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(19.dp), tint = ProfileText)
+        }
     }
 }
 
