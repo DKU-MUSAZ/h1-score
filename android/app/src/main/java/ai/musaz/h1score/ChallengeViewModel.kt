@@ -1,6 +1,7 @@
 package ai.musaz.h1score
 
 import android.app.Application
+import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
@@ -52,6 +53,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     var report by mutableStateOf<ScoreReport?>(null); private set
     var ranking by mutableStateOf<List<RankedEntry>>(emptyList()); private set
     var earned by mutableIntStateOf(0); private set
+    internal var badgeMileageEarned by mutableIntStateOf(0); private set
     var notice by mutableStateOf<String?>(null)
     var completed by mutableIntStateOf(0); private set
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
@@ -334,7 +336,15 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
 
     internal fun startSpotVisit(spot: SpotTour) {
-        if (demo || !parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !beginService()) return
+        if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle()) return
+        if (demo) {
+            val recordedDays = collectionProgress.visitsBySpot[spot].orEmpty()
+            val today = LocalDate.now(ChallengeRound.seoul)
+            val nextDay = generateSequence(today) { it.minusDays(1) }.first { it !in recordedDays }
+            notice = recordSpotVisit(spot, nextDay)
+            return
+        }
+        if (!beginService()) return
         trackedSpot = spot
         spotStartedAt = Instant.now()
         spotRouteId = null
@@ -375,19 +385,26 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         val arrivedAt = vehicle.arrivedAt ?: return
         val startedAt = spotStartedAt ?: return
         if (!matches || route != spotRouteId || arrivedAt < startedAt || !vehicle.parked) return
-        val progress = collectionProgress.recordVisit(spot, arrivedAt.atZone(ChallengeRound.seoul).toLocalDate())
-        val changed = progress != collectionProgress
-        if (changed) {
-            collectionStore.saveVisit(spot, progress)
-            collectionProgress = progress
-        }
+        finishSpotVisit(recordSpotVisit(spot, arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()))
+    }
+
+    private fun recordSpotVisit(spot: SpotTour, day: LocalDate): String {
+        val previous = collectionProgress
+        val progress = previous.recordVisit(spot, day)
         val visits = progress.visits(spot)
-        finishSpotVisit(when {
-            changed && visits == 3 -> "${spot.city} 스팟투어 배지를 획득했어요"
-            changed -> "${spot.city} 스팟투어 방문을 기록했어요 · $visits / 3회"
-            visits == 3 -> "이미 획득한 스팟투어 배지예요"
-            else -> "오늘 이 스팟의 방문은 이미 기록됐어요"
-        })
+        if (progress == previous) {
+            return if (visits >= SpotTour.REQUIRED_VISITS) "이미 획득한 스팟투어 배지예요"
+                else "오늘 이 스팟의 방문은 이미 기록됐어요"
+        }
+        val editor = prefs.edit()
+        collectionStore.writeVisit(editor, demo, spot, progress)
+        val award = creditNewBadges(previous, rankBadgeProgress, progress, rankBadgeProgress).singleOrNull()
+        writeMileage(editor)
+        editor.apply()
+        collectionProgress = progress
+        balance = ledger.balance
+        return if (award != null) "${award.title} 배지를 획득했어요 · +${award.mileage}M"
+            else "${spot.city} 스팟투어 방문을 기록했어요 · $visits / ${SpotTour.REQUIRED_VISITS}회"
     }
 
     private val rankBadgeKey get() = if (demo) "rank-badges-demo" else "rank-badges-live"
@@ -398,28 +415,55 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
     )
 
-    private fun recordRankBadgeProgress(arrivedAt: Instant, rank: Int, participants: Int) {
+    private fun recordRankBadgeProgress(editor: SharedPreferences.Editor, arrivedAt: Instant, rank: Int, participants: Int) {
         val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
         val updated = rankBadgeProgress.record(day, rank, participants, demo)
         if (updated == rankBadgeProgress) return
         val key = rankBadgeKey
-        prefs.edit().apply {
+        editor.apply {
             RankBadgeGoal.entries.forEach { putInt("$key-${it.id}", updated.days(it)) }
             putStringSet("$key-days", updated.countedDays.map { it.toString() }.toSet())
-        }.apply()
+        }
         rankBadgeProgress = updated
     }
     fun chooseDemoDrive(profile: DemoDrive) { if(demo && parked && !activeJourney) demoDrive=profile }
     fun acknowledgeBadge() { if(parked) pendingBadges=pendingBadges.drop(1) }
-    private val ledger = MileageLedger(prefs.getInt("balance", 0),prefs.getStringSet("settled", emptySet()) ?: emptySet(),prefs.getStringSet("daily", emptySet()) ?: emptySet())
+    // The original wallet was for demonstration rewards. Keep those entries in the demo wallet.
+    private fun mileageKey(key: String) = if (demo) key else "$key-live"
+    private fun readMileage() = MileageLedger(
+        prefs.getInt(mileageKey("balance"), 0),
+        prefs.getStringSet(mileageKey("settled"), emptySet()).orEmpty(),
+        prefs.getStringSet(mileageKey("daily"), emptySet()).orEmpty(),
+    )
+    private fun readRedeemedRewards() = prefs.getStringSet(mileageKey("redeemed-rewards"), emptySet()).orEmpty().toSet()
+    private var ledger = readMileage()
     var balance by mutableIntStateOf(ledger.balance); private set
-    var redeemedRewards by mutableStateOf(prefs.getStringSet("redeemed-rewards", emptySet())?.toSet().orEmpty())
+    var redeemedRewards by mutableStateOf(readRedeemedRewards())
         private set
+    private fun reloadMileage() {
+        ledger = readMileage()
+        balance = ledger.balance
+        redeemedRewards = readRedeemedRewards()
+    }
+
+    private fun writeMileage(editor: SharedPreferences.Editor) {
+        editor.putInt(mileageKey("balance"), ledger.balance)
+            .putStringSet(mileageKey("settled"), ledger.settlementIds)
+            .putStringSet(mileageKey("daily"), ledger.dailyKeys)
+    }
+
+    private fun creditNewBadges(
+        previous: CollectionProgress, previousRanks: RankBadgeProgress,
+        progress: CollectionProgress, ranks: RankBadgeProgress,
+    ): List<BadgeAward> = newlyEarnedCollectionBadges(previous, previousRanks, progress, ranks)
+        .filter { ledger.creditBadge(it.id, it.mileage) > 0 }
+
     internal fun redeemDemoReward(reward: MileageReward) {
-        if (!parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
+        if (!demo || !parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
         balance = ledger.balance
         redeemedRewards = redeemedRewards + reward.id
-        prefs.edit().putInt("balance", balance).putStringSet("redeemed-rewards", redeemedRewards).apply()
+        prefs.edit().putInt(mileageKey("balance"), balance)
+            .putStringSet(mileageKey("redeemed-rewards"), redeemedRewards).apply()
     }
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()
@@ -496,6 +540,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         demoRunning = false
         demoMoving = false
         demo = false
+        reloadMileage()
         consoleTest = true
         consoleSessionLimitKph = consoleLimitKph
         activeRound = null
@@ -512,6 +557,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         progressReport = ScoreEngine.evaluate(emptyList())
         ranking = emptyList()
         earned = 0
+        badgeMileageEarned = 0
         pendingBadges = emptyList()
         ownedBadges = prefs.getStringSet("badges-live", emptySet())?.toSet() ?: emptySet()
         rankBadgeProgress = readRankBadgeProgress(rankBadgeKey)
@@ -539,6 +585,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         connection.setConsoleCapture(false)
         ranking = emptyList()
         earned = 0
+        badgeMileageEarned = 0
         pendingBadges = emptyList()
         // A console result is diagnostic only: no history, weekly score, badges, or rewards.
         screen = Screen.RESULT
@@ -570,12 +617,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                 connection.setConsoleCapture(false)
                 consoleTest=false
                 demo=saved.demo
+                reloadMileage()
                 ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
                 rankBadgeProgress=readRankBadgeProgress(rankBadgeKey)
                 collectionProgress=collectionStore.read(demo)
                 recordedDistanceMeters=prefs.getLong(distanceKey(demo),0)
                 session=saved.session; report=saved.report; ranking=saved.ranking
                 earned=saved.earned; missedDeadline=saved.missedDeadline
+                badgeMileageEarned = saved.badgeMileage
                 completedDestinationName=saved.name
                 selected=challengeSpots.firstOrNull {it.venueId==saved.session.venueId} ?: selected
             }
@@ -614,6 +663,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         connection.setConsoleCapture(false)
         consoleTest=false
         demo=!demo
+        reloadMileage()
         selectedHistoryRecord=null
         pendingBadges=emptyList()
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
@@ -621,6 +671,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         collectionProgress = collectionStore.read(demo)
         recordedDistanceMeters = prefs.getLong(distanceKey(demo), 0)
         session=null; report=null; ranking=emptyList(); earned=0
+        badgeMileageEarned = 0
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
     }
@@ -655,6 +706,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         samples.clear(); turnDetector.reset(); lastTurnAt=0; lastReportAt=0; recordingStartedAtNanos=null
         progressReport=ScoreEngine.evaluate(emptyList())
         report=null; ranking=emptyList(); earned=0; pendingBadges=emptyList()
+        badgeMileageEarned = 0
         remainingM=distanceKm*1000
         session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
         recordingStartedAtNanos = if (!demo && phase == Phase.RECORDING) SystemClock.elapsedRealtimeNanos() else null
@@ -706,6 +758,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             progressReport=ScoreEngine.evaluate(emptyList())
             ranking=emptyList()
             earned=0
+            badgeMileageEarned = 0
             pendingBadges=emptyList()
             recordingStartedAtNanos=null
             turnDetector.interrupt()
@@ -758,15 +811,18 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
         val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
         val score = r.score
+        val previousCollection = collectionProgress
+        val previousRanks = rankBadgeProgress
+        val editor = prefs.edit()
         if (arrivedAt != null && score != null) {
             recordedDistanceMeters += r.validDistanceM.roundToLong()
-            prefs.edit().putLong(distanceKey(demo), recordedDistanceMeters).apply()
+            editor.putLong(distanceKey(demo), recordedDistanceMeters)
         }
         if (arrivedAt != null && withinRound && s.rankingEligible && r.valid && score != null) {
             val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
             val progress = collectionProgress.recordChallenge(day, score)
             if (progress != collectionProgress) {
-                collectionStore.saveChallenge(demo, progress)
+                collectionStore.writeChallenge(editor, demo, progress)
                 collectionProgress = progress
             }
         }
@@ -785,22 +841,25 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
             earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
-            balance=ledger.balance
-            prefs.edit().putInt("balance",balance).putStringSet("settled",ledger.settlementIds).putStringSet("daily",ledger.dailyKeys).apply()
             if(allocation>0 && earned==0) notice="오늘의 보상 한도를 적용했어요 · 목적지별 1회, 하루 2회"
         } else { ranking=emptyList(); earned=0 }
         val playerRank = ranking.firstOrNull { it.id == "나" }?.rank
         if (playerRank != null && arrivedAt != null) {
-            recordRankBadgeProgress(arrivedAt, playerRank, ranking.size)
+            recordRankBadgeProgress(editor, arrivedAt, playerRank, ranking.size)
         }
-        pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,playerRank,ownedBadges)
-        ownedBadges=ownedBadges+pendingBadges.map { it.id }
-        prefs.edit().putStringSet(if(demo) "badges-demo" else "badges-live",ownedBadges).apply()
+        val legacyAwards = BadgeRules.newAwards(r.valid, s.destinationId, r.score, playerRank, ownedBadges)
+        val collectionAwards = creditNewBadges(previousCollection, previousRanks, collectionProgress, rankBadgeProgress)
+        badgeMileageEarned = collectionAwards.sumOf { it.mileage }
+        pendingBadges = legacyAwards + collectionAwards
+        ownedBadges = ownedBadges + legacyAwards.map { it.id }
+        editor.putStringSet(if (demo) "badges-demo" else "badges-live", ownedBadges)
+        writeMileage(editor)
         if (voiceEnabled && uiVisible && parked)
             voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
         completedDestinationName=destinationName
         completedDriveStore.save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline,
-            completedAtEpochMs=System.currentTimeMillis()))
+            completedAtEpochMs=System.currentTimeMillis(), badgeMileage=badgeMileageEarned), editor)
+        balance = ledger.balance
         completedDrives=completedDriveStore.readAll()
         completed++
         screen=Screen.RESULT

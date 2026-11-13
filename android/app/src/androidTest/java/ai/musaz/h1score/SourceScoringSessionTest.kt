@@ -77,7 +77,7 @@ class SourceScoringSessionTest {
     @Test fun consoleUsesFrozenTestLimitAndNeverWritesProductionProgress() {
         ui.runOnIdle {
             val app = application()
-            app.prefs.edit().putInt("balance", 80).putLong("recorded-distance-live", 500)
+            app.prefs.edit().putInt("balance-live", 80).putLong("recorded-distance-live", 500)
                 .putStringSet("collection-scores-live", setOf("2026-11-01=92"))
                 .putStringSet("badges-live", setOf("existing-badge")).commit()
             val vm = model(app)

@@ -20,7 +20,7 @@ class FirstRunUiTest {
     @Test fun consentNicknameTourAndRestartAreOneTime() {
         val video=InstrumentationRegistry.getArguments().getString("demoVideo")=="true"
         val prefs=ui.activity.getSharedPreferences("onboarding-test-${UUID.randomUUID()}",Context.MODE_PRIVATE)
-        if(!video) prefs.edit().putInt("balance",240).putLong("recorded-distance-live",13500L).commit()
+        if(!video) prefs.edit().putInt("balance-live",240).putLong("recorded-distance-live",13500L).commit()
         val app=object: android.app.Application() {
             init {attachBaseContext(ui.activity.applicationContext)}
             override fun getSharedPreferences(name:String,mode:Int)=prefs

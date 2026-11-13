@@ -177,8 +177,10 @@ class ScoringDownstreamTest {
         // the test runner's weekday. The other day is only an isolated store fixture.
         val referenceDate = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
         val otherDay = if (today.dayOfWeek == DayOfWeek.MONDAY) today.plusDays(1) else today.minusDays(1)
-        CollectionProgressStore(app.prefs).saveChallenge(false,
+        val editor = app.prefs.edit()
+        CollectionProgressStore(app.prefs).writeChallenge(editor, false,
             CollectionProgress().recordChallenge(otherDay, 100).recordChallenge(referenceDate.minusDays(7), 61))
+        editor.commit()
         ui.runOnIdle {
             val vm = model(app)
             assertEquals(95, completeLiveTrip(vm, compliantMeters = 8_750).score)
@@ -197,6 +199,28 @@ class ScoringDownstreamTest {
             assertEquals(98, restored.collectionProgress.weeklyScoreAverage(referenceDate))
             assertEquals(20_000L, restored.recordedDistanceMeters)
             assertEquals(2, restored.collectionProgress.scoreDays(95))
+        }
+    }
+
+    @Test fun liveChallengeCreditsNewBadgesWithoutPlacementMileage() {
+        val app = application()
+        val lastMonday = LocalDate.now(ChallengeRound.seoul).minusWeeks(1).with(DayOfWeek.MONDAY)
+        val previous = CollectionProgress((0L..3L).associate { lastMonday.plusDays(it) to 92 })
+        val editor = app.prefs.edit()
+        CollectionProgressStore(app.prefs).writeChallenge(editor, false, previous)
+        editor.commit()
+
+        ui.runOnIdle {
+            val vm = model(app)
+            assertEquals(95, completeLiveTrip(vm, compliantMeters = 8_750).score)
+            assertEquals(0, vm.earned)
+            assertEquals(40, vm.badgeMileageEarned)
+            assertEquals(40, vm.balance)
+            assertEquals(40, CompletedDriveStore(app.prefs).read()?.badgeMileage)
+
+            assertEquals(80, completeLiveTrip(vm, compliantMeters = 5_000).score)
+            assertEquals(0, vm.badgeMileageEarned)
+            assertEquals(40, model(app).balance)
         }
     }
 

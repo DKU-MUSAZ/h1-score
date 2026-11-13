@@ -10,16 +10,17 @@ internal data class CompletedDrive(
     val demo: Boolean, val ranking: List<RankedEntry>, val earned: Int, val missedDeadline: Boolean,
     val completedAtEpochMs: Long? = null,
     val scoringVersion: String = report.scoringVersion,
+    val badgeMileage: Int = 0,
 )
 
 internal class CompletedDriveStore(private val prefs: SharedPreferences) {
-    fun save(value: CompletedDrive) = synchronized(lock) {
+    fun save(value: CompletedDrive, editor: SharedPreferences.Editor = prefs.edit()) = synchronized(lock) {
         val existing = readAllLocked()
         val previous = existing.firstOrNull { it.session.id == value.session.id }
         val saved = value.copy(completedAtEpochMs = value.completedAtEpochMs ?: previous?.completedAtEpochMs)
         val records = newestFirst(listOf(saved) + existing.filterNot { it.session.id == saved.session.id })
         // One synchronous edit keeps the history and notification's latest result together.
-        prefs.edit()
+        editor
             .putString(HISTORY_KEY, encodeList(records).toString())
             .putString(LATEST_KEY, encode(saved).toString())
             .commit()
@@ -72,6 +73,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             put("id", s.id); put("destinationId", s.destinationId); put("initialDistanceM", s.initialDistanceM)
             put("venueId", s.venueId); put("competitionId", s.competitionId)
             put("name", value.name); put("demo", value.demo); put("earned", value.earned); put("missedDeadline", value.missedDeadline)
+            put("badgeMileage", value.badgeMileage)
             put("completedAtEpochMs", value.completedAtEpochMs); put("scoringVersion", value.scoringVersion)
             put("score", r.score); put("compliance", r.compliance); put("smoothness", r.smoothness)
             put("distance", r.validDistanceM); put("coverage", r.coverage); put("valid", r.valid)
@@ -166,6 +168,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             missedDeadline = j.getBoolean("missedDeadline"),
             completedAtEpochMs = if (j.has("completedAtEpochMs") && !j.isNull("completedAtEpochMs")) j.getLong("completedAtEpochMs") else null,
             scoringVersion = version,
+            badgeMileage = j.optInt("badgeMileage"),
         )
     }.getOrNull()
 

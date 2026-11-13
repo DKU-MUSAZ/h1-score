@@ -683,6 +683,7 @@ internal fun LiveRouteChallengeDialog(
     val ranking=saved?.ranking ?: vm.ranking
     val missedDeadline=saved?.missedDeadline ?: vm.missedDeadline
     val earned=saved?.earned ?: vm.earned
+    val badgeMileage = saved?.badgeMileage ?: vm.badgeMileageEarned
     Surface(Modifier.fillMaxWidth().padding(top=12.dp),color=Color.White,shape=RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -692,7 +693,7 @@ internal fun LiveRouteChallengeDialog(
             }
             Text(if(saved==null && vm.consoleTest) "실제 SDK 차속으로 점수 로직 시험" else if(demo) "같은 회차 · 챌린지 반경 1km" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=12.dp))
             if(ranking.isEmpty()) {
-                Text(if(saved==null && vm.consoleTest) "시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정 · 내 기록·주간 점수·배지·보상에 반영하지 않아요." else if(!demo) "이번 기록은 개인 결과로 확인해요. 실제 경쟁·보상은 서버 연결 후 제공해요."
+                Text(if(saved==null && vm.consoleTest) "시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정 · 내 기록·주간 점수·배지·보상에 반영하지 않아요." else if(!demo) "이번 기록은 개인 결과로 확인해요. 실제 순위 보상은 서버 연결 후 제공해요."
                     else if(missedDeadline) "마감 이후에 도착해 개인 기록만 표시해요."
                     else "보상 순위에 필요한 거리·데이터 조건을 채우지 못했어요.",fontSize=14.sp,lineHeight=22.sp,color=Muted)
             } else ranking.forEach {row ->
@@ -705,7 +706,11 @@ internal fun LiveRouteChallengeDialog(
             }
             HorizontalDivider(Modifier.padding(top=8.dp),color=Line)
             Row(Modifier.fillMaxWidth().padding(top=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                Column { Text("이번에 쌓인 마일리지",fontSize=12.sp,color=Muted);Text("+${earned} M",fontSize=25.sp,fontWeight=FontWeight.Bold,color=Green,modifier=Modifier.padding(top=2.dp)) }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("이번에 쌓인 마일리지", fontSize = 12.sp, color = Muted)
+                    Text("순위 보상 +${earned}M", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Green)
+                    Text("배지 보상 +${badgeMileage}M", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Green)
+                }
                 Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick={vm.navigate(Screen.WALLET)},shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.filledTonalButtonColors(containerColor=PaleMint,contentColor=Green)) { Text("내 마일리지");Icon(Icons.Outlined.ChevronRight,null,Modifier.size(18.dp)) }
             }
@@ -857,7 +862,12 @@ internal fun LiveRouteChallengeDialog(
                 Text(badge.title,fontSize=31.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=12.dp))
                 // The shield mascot is reserved exclusively for this newly earned badge event.
                 Mascot(3,Modifier.size(280.dp))
-                Text(badge.description,fontSize=15.sp,color=Muted,textAlign=TextAlign.Center,lineHeight=24.sp,modifier=Modifier.padding(bottom=20.dp))
+                Text(badge.description,fontSize=15.sp,color=Muted,textAlign=TextAlign.Center,lineHeight=24.sp)
+                if (badge.mileage > 0) {
+                    Text("+${badge.mileage}M 적립", fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                        color = Green, modifier = Modifier.padding(top = 6.dp))
+                }
+                Spacer(Modifier.height(20.dp))
                 Primary(if(remaining>1) "다음 배지 보기 (${remaining-1}개)" else "좋은 순간으로 간직하기",Icons.Outlined.Check,action=onNext)
             }
         }
