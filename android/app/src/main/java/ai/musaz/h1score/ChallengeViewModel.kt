@@ -60,6 +60,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("h1-demo-v1",0)
     private val completedDriveStore = CompletedDriveStore(prefs)
     internal var completedDrives by mutableStateOf(completedDriveStore.readAll()); private set
+    private val historyExamples by lazy { demoHistoryExamples() }
+    internal val historyDrives get() = if (demo) completedDrives + historyExamples else completedDrives
     internal var selectedHistoryRecord by mutableStateOf<CompletedDrive?>(null); private set
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
         private set
@@ -681,7 +683,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     internal fun openHistoryRecord(id: String) {
         if(!parked) { notice="주차 후 확인할 수 있어요"; return }
-        val saved=completedDrives.firstOrNull { it.session.id == id } ?: return
+        val saved=historyDrives.firstOrNull { it.session.id == id } ?: return
         // Viewing an old result must not restore or settle it as the current journey.
         selectedHistoryRecord=saved
         screen=Screen.RESULT
