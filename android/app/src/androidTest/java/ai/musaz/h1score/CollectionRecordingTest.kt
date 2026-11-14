@@ -16,7 +16,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.junit.Assert.assertEquals
@@ -179,16 +178,22 @@ class CollectionRecordingTest {
             val id=vm.addShortcut("학교")!!
             assertNull(vm.addShortcut("학교"))
             val place=ai.musaz.h1score.core.SavedPlace.from("단국대학교 죽전캠퍼스", ai.musaz.h1score.core.GeoPoint(37.3217,127.1268))!!
-            assertTrue(vm.saveShortcutPlace(id,place))
-            assertEquals(place,model().destinationShortcuts.single { it.id==id }.place)
-            assertTrue(vm.renameShortcut(id,"캠퍼스"))
-            assertEquals("캠퍼스",model().destinationShortcuts.single { it.id==id }.label)
-            vm.receiveVehicle(parkedVehicle().copy(gearPark=false))
-            assertNull(vm.addShortcut("운동장"))
-            vm.removeShortcut(id)
-            assertTrue(vm.destinationShortcuts.any { it.id==id })
-            vm.receiveVehicle(parkedVehicle())
-            vm.removeShortcut(id)
+            app.prefs.edit().putString("destination-shortcuts-v2", org.json.JSONArray().put(
+                org.json.JSONObject()
+                    .put("id", id).put("label", "학교").put("name", place.name)
+                    .put("lat", place.point.latitude).put("lon", place.point.longitude)
+            ).toString()).apply()
+            val restored = model()
+            assertEquals(place.name, restored.destinationShortcuts.single().searchQuery)
+            assertTrue(restored.saveShortcut(id, "캠퍼스", "단국대학교"))
+            assertEquals("단국대학교", model().destinationShortcuts.single().searchQuery)
+            assertEquals("캠퍼스", model().destinationShortcuts.single().label)
+            restored.receiveVehicle(parkedVehicle().copy(gearPark=false))
+            assertNull(restored.addShortcut("운동장"))
+            restored.removeShortcut(id)
+            assertTrue(restored.destinationShortcuts.any { it.id==id })
+            restored.receiveVehicle(parkedVehicle())
+            restored.removeShortcut(id)
             assertTrue(model().destinationShortcuts.none { it.id==id })
         }
     }
@@ -202,26 +207,72 @@ class CollectionRecordingTest {
         assertTrue(challengeSpots.any {it.demoPeers==9})
     }
 
-    @Test fun customShortcutEditorAddsSchoolAndRequiresRealPlace() {
-        val vm=ui.runOnIdle { ChallengeViewModel(isolatedApplication()).apply { receiveVehicle(parkedVehicle()); switchSource() } }
-        var editorOpen by mutableStateOf(true)
-        ui.setContent { MaterialTheme { if (editorOpen) DestinationShortcutEditor(vm, null) { editorOpen = false } } }
-        ui.onNode(hasSetTextAction()).performTextReplacement("학교")
+    @Test fun homeShortcutSavesTypedPlaceAndUsesNormalSearch() {
+        val app = isolatedApplication()
+        val vm = ui.runOnIdle {
+            ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+            }
+        }
+        ui.setContent { MaterialTheme { ChallengeHomeScreen(vm) } }
+        ui.onNode(hasSetTextAction()).performClick()
+        ui.onNodeWithText("집").performClick()
+        ui.onNodeWithText("장소 이름 또는 주소").performTextReplacement("여의도 한강공원")
         ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
-        ui.onNodeWithText("바로가기 추가").performSemanticsAction(SemanticsActions.OnClick)
-        ui.onNodeWithText("학교 목적지").assertExists()
-        val screenshot=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
-        java.io.File(ui.activity.filesDir, "shortcut-editor.png").outputStream().use {
-            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)
+        ui.onNodeWithText("저장").performClick()
+        ui.onNode(hasText("닫기") and hasAnyAncestor(isDialog())).performClick()
+        ui.runOnIdle {
+            assertEquals("여의도 한강공원", ChallengeViewModel(app).destinationShortcuts.first().searchQuery)
+            vm.receiveVehicle(parkedVehicle())
+        }
+
+        ui.onNodeWithText("집").performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText("이 목적지로 챌린지에 참가할까요?").fetchSemanticsNodes().isNotEmpty()
+        }
+        ui.onNode(hasText("내비 목적지") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onAllNodes(hasText("여의도 한강공원") and hasAnyAncestor(isDialog())).onFirst().assertIsDisplayed()
+        ui.runOnIdle { assertEquals(0, app.navigationLaunches) }
+    }
+
+    @Test fun resolvedPlaceOutsideVenueOffersNormalNavigation() {
+        val app = isolatedApplication()
+        val vm = ui.runOnIdle { ChallengeViewModel(app).apply { receiveVehicle(parkedVehicle()) } }
+        val place = checkNotNull(ai.musaz.h1score.core.SavedPlace.from(
+            "서울역", ai.musaz.h1score.core.GeoPoint(37.5547, 126.9707),
+        ))
+        ui.setContent { MaterialTheme { ResolvedDestinationDialog(vm, place) {} } }
+
+        ui.onNodeWithText("일반 길 안내를 시작할까요?").assertIsDisplayed()
+        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertDoesNotExist()
+        ui.runOnIdle { assertEquals(0, app.navigationLaunches) }
+        val screenshot = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .uiAutomation.takeScreenshot()
+        ui.activity.filesDir.resolve("outside-venue-directions.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
         }
         screenshot.recycle()
-        ui.onNodeWithText("저장").assertIsNotEnabled()
-        ui.runOnIdle { vm.receiveVehicle(parkedVehicle().copy(destination="서울역",destinationPoint=ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),destinationAt=SystemClock.elapsedRealtime())) }
-        ui.waitUntil(3000) { ui.onAllNodesWithText("현재 내비 목적지 선택: 서울역").fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText("현재 내비 목적지 선택: 서울역").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
-        ui.runOnIdle { vm.receiveVehicle(vm.live.copy(speedAt = SystemClock.elapsedRealtime())) }
-        ui.onNodeWithText("저장").performSemanticsAction(SemanticsActions.OnClick)
-        ui.runOnIdle { assertEquals("서울역",vm.destinationShortcuts.single {it.label=="학교"}.place?.name) }
+    }
+
+    @Test fun placeSuggestionChecksChallengeBeforeOpeningNavigation() {
+        val app = isolatedApplication()
+        val vm = ui.runOnIdle { ChallengeViewModel(app).apply { receiveVehicle(parkedVehicle()) } }
+        ui.setContent { MaterialTheme { ChallengeHomeScreen(vm) } }
+
+        val search = ui.onNode(hasSetTextAction())
+        search.performTextReplacement("더현대")
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("더현대 서울").fetchSemanticsNodes().isNotEmpty() }
+        ui.runOnIdle { vm.receiveVehicle(parkedVehicle()) }
+        ui.onNodeWithText("더현대 서울").performClick()
+        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertIsDisplayed()
+        ui.onNodeWithText("더현대 서울에서 1km 이내에 있는 가장 가까운 개최지예요.").assertIsDisplayed()
+        ui.onNode(hasText("내비 목적지") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNode(hasText("더현대 서울") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        for (number in listOf("①", "②", "③")) {
+            ui.onNodeWithText(number).assertExists()
+        }
+        ui.runOnIdle { assertEquals(0, app.navigationLaunches) }
     }
 
     @Test fun demoSearchFindsDankookUniversityWithoutTheCampusSuffix() {
@@ -250,7 +301,8 @@ class CollectionRecordingTest {
         ui.runOnIdle {
             val now=Instant.now()
             val round=ChallengeRound("배정 검증",now.minusSeconds(30),now.plusSeconds(3600))
-            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String)=ChallengeViewModel(app).apply {
+            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String,
+                participant: Application = app)=ChallengeViewModel(participant).apply {
                 receiveVehicle(parkedVehicle().copy(destination="사용자가 고른 목적지",destinationId=id,
                     destinationPoint=point,destinationAt=SystemClock.elapsedRealtime(),remainingM=12000.0))
             }
@@ -260,7 +312,8 @@ class CollectionRecordingTest {
             assertEquals("olympic-park",a.session?.venueId)
             assertEquals("poi-a",a.session?.destinationId)
             assertEquals("사용자가 고른 목적지",a.destinationName)
-            val b=model(requireNotNull(venue.point),"poi-b")
+            // Compare two participants, not a second same-day entry by the first driver.
+            val b=model(requireNotNull(venue.point),"poi-b",isolatedApplication())
             b.accept(round)
             assertEquals(a.session?.competitionId,b.session?.competitionId)
             val outside=model(ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),"seoul-station")

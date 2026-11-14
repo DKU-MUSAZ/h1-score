@@ -32,9 +32,37 @@ class SeatBeltSessionTest {
         apps.forEach { it.prefs.edit().clear().commit() }
     }
 
-    @Test fun reservationAllowsUnbuckledParkAndStoppedDriveOrReverse() = ui.runOnIdle {
+    @Test fun reservationRequiresFreshDriverBuckleWithoutConsumingTheDay() = ui.runOnIdle {
+        val variants = listOf<(LiveVehicle) -> LiveVehicle>(
+            { it.copy(belt = false) }, { it.copy(belt = null) },
+            { it.copy(beltAt = it.beltAt - 2501) },
+            { it.copy(belt = null, beltWarningOffAt = it.beltAt) },
+        )
+        for (missing in variants) {
+            val app = application()
+            val vm = model(app)
+            val now = SystemClock.elapsedRealtime()
+            val spot = challengeSpots.first()
+            val route = telemetry(LiveVehicle(), now).copy(destination = spot.name,
+                destinationId = "entry-belt-${UUID.randomUUID()}", destinationPoint = spot.point,
+                destinationAt = now, remainingM = 12_000.0)
+            val instant = Instant.now()
+            val round = ChallengeRound("참가 조건 검증", instant.minusSeconds(60), instant.plusSeconds(3600))
+            vm.receiveVehicle(missing(route), now)
+            vm.accept(round)
+            assertFalse("Unbuckled, missing or stale driver belt must block reservation", vm.activeJourney)
+            vm.joinMapChallenge(round, spot)
+            assertFalse(vm.awaitingMapRoute)
+            assertTrue(DailyParticipationStore(app.prefs).available(false,
+                instant.atZone(ChallengeRound.seoul).toLocalDate()))
+            begin(vm, recording = false)
+            assertEquals(Phase.RESERVED, vm.phase)
+        }
+    }
+
+    @Test fun acceptedReservationAllowsUnbucklingWhileParkedOrStoppedInDriveAndReverse() = ui.runOnIdle {
         val vm = model(application())
-        begin(vm, recording = false, driver = false)
+        begin(vm, recording = false)
         val start = SystemClock.elapsedRealtime()
         listOf(VehicleGear.GEAR_PARK, VehicleGear.GEAR_DRIVE, VehicleGear.GEAR_REVERSE).forEachIndexed { index, gear ->
             val at = start + index * 250L

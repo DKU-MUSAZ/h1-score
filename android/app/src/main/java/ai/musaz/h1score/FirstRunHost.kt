@@ -195,23 +195,25 @@ private val tourSteps=listOf(
             drawPath(shade,Color(0xFF0A1628).copy(alpha=.82f))
             if(hole!=null) drawRoundRect(Color.White,topLeft=hole.topLeft,size=hole.size,cornerRadius=androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()),style=Stroke(2.dp.toPx()))
         }
-        Surface(Modifier.align(Alignment.CenterEnd).padding(32.dp).widthIn(max=740.dp),shape=RoundedCornerShape(32.dp),color=Color.White,shadowElevation=12.dp) {
-            Row(Modifier.height(IntrinsicSize.Min)) {
-                Column(Modifier.width(220.dp).fillMaxHeight().background(H1Style.Ink).padding(24.dp),verticalArrangement=Arrangement.spacedBy(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                    Text("안운잘부",modifier=Modifier.fillMaxWidth(),color=Color.White,fontSize=20.sp,fontWeight=FontWeight.Bold)
-                    Box(Modifier.weight(1f),contentAlignment=Alignment.Center) {
-                        Image(painterResource(R.drawable.musaz_tutorial_guide),null,Modifier.fillMaxWidth().height(200.dp))
+        Surface(Modifier.align(Alignment.CenterEnd).padding(32.dp).widthIn(max=410.dp),shape=RoundedCornerShape(24.dp),color=Color.White,shadowElevation=12.dp) {
+            Column(Modifier.padding(28.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("무사즈의 첫 안내  ${index+1} / ${tourSteps.size}",fontSize=14.sp,color=H1Style.Green,fontWeight=FontWeight.SemiBold)
+                        Text(step.title,fontSize=25.sp,lineHeight=33.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)
                     }
+                    Image(painterResource(R.drawable.musaz_tutorial_guide), null, Modifier.size(64.dp))
                 }
-                Column(Modifier.weight(1f).padding(32.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) {
-                    Text(step.title,fontSize=38.sp,lineHeight=48.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)
-                    Text(step.body,fontSize=20.sp,lineHeight=30.sp,color=H1Style.Muted)
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                        TextButton(onClick=onSkip) {Text("건너뛰기",fontSize=18.sp,color=H1Style.Muted)}
-                        Spacer(Modifier.weight(1f))
-                        if(index>0) TextButton(onClick=onBack) {Text("이전",fontSize=20.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)}
-                    }
-                    Button(onClick=onNext,modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(15.dp)) {Text(if(index==tourSteps.lastIndex) "무사즈와 출발하기" else "다음",fontSize=20.sp,fontWeight=FontWeight.Bold)}
+                Text(step.body,fontSize=17.sp,lineHeight=27.sp,color=H1Style.Muted)
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    TextButton(onClick=onSkip) {Text("바로 시작하기",color=H1Style.Muted)}
+                    Spacer(Modifier.weight(1f))
+                    if(index>0) TextButton(onClick=onBack) {Text("이전")}
+                    Button(onClick=onNext,shape=RoundedCornerShape(12.dp)) {Text(if(index==tourSteps.lastIndex) "무사즈와 출발하기" else "다음")}
                 }
             }
         }

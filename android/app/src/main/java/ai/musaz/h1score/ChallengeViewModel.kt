@@ -28,7 +28,9 @@ val demoDestinations = listOf(
 )
 internal val challengeSpots get() = demoDestinations.filter { it.point != null }
 internal val hangangChallenge = demoDestinations.first { it.name == "여의도한강공원" }
-internal data class DestinationShortcut(val id: String, val label: String, val place: SavedPlace? = null, val legacyQuery: String = "")
+internal data class DestinationShortcut(val id: String, val label: String, val place: SavedPlace? = null, val legacyQuery: String = "") {
+    val searchQuery: String get() = place?.name ?: legacyQuery
+}
 private const val HomeShortcutKey = "destination-shortcut-home"
 private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
@@ -102,28 +104,24 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         writeShortcuts(destinationShortcuts + item)
         return item.id
     }
-    internal fun renameShortcut(id: String, label: String): Boolean {
-        val clean=shortcutLabel(label) ?: return false
-        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || destinationShortcuts.any { it.id!=id && it.label==clean }) return false
-        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(label=clean) else it })
-        return true
-    }
     internal fun removeShortcut(id: String) {
         if (!canChooseDestination) return
         writeShortcuts(destinationShortcuts.filterNot { it.id==id })
     }
     internal val currentNavigationPlace get() = if (!live.routeCancelled && SystemClock.elapsedRealtime()-live.destinationAt in 0..10_000)
         SavedPlace.from(live.destination.orEmpty(),live.destinationPoint) else null
-    internal fun saveShortcutPlace(id: String, place: SavedPlace): Boolean {
-        if (!canChooseDestination || destinationShortcuts.none { it.id==id } || SavedPlace.from(place.name,place.point)==null) return false
-        writeShortcuts(destinationShortcuts.map { if(it.id==id) it.copy(place=place,legacyQuery="") else it })
+    internal fun saveShortcut(id: String, label: String, query: String): Boolean {
+        val cleanLabel = shortcutLabel(label) ?: return false
+        val cleanQuery = query.trim()
+        if (!canChooseDestination || cleanQuery.isBlank() ||
+            destinationShortcuts.none { it.id == id } ||
+            destinationShortcuts.any { it.id != id && it.label == cleanLabel }
+        ) return false
+
+        writeShortcuts(destinationShortcuts.map { item ->
+            if (item.id == id) item.copy(label = cleanLabel, place = null, legacyQuery = cleanQuery) else item
+        })
         return true
-    }
-    internal fun navigateShortcut(id: String) {
-        if (!canChooseDestination || !live.parked) return
-        val place=destinationShortcuts.find { it.id==id }?.place ?: return
-        if (connection.requestSavedRoute(place)) { rememberDestination(place.name); openBuiltInNavigation() }
-        else notice="내비 연결을 확인해 주세요. 저장한 목적지는 유지돼요."
     }
     internal var recordedDistanceMeters by mutableLongStateOf(prefs.getLong(distanceKey(false), 0))
         private set
@@ -214,7 +212,14 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
 
 
+    private fun driverBeltAllowsEntry(): Boolean {
+        if (demo || live.beltConditionMet) return true
+        notice = "운전석 안전벨트 착용이 확인돼야 챌린지를 시작할 수 있어요."
+        return false
+    }
+
     private fun canJoinRound(round: ChallengeRound): Boolean {
+        if (!driverBeltAllowsEntry()) return false
         if (!participationStore.available(demo, clock().atZone(ChallengeRound.seoul).toLocalDate())) {
             notice = "오늘은 이미 참가했어요. 실격·취소를 포함해 하루 한 경기만 참여할 수 있어요. 내일 다시 만나요."
             return false
@@ -747,6 +752,11 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         startSession()
     }
     private fun startSession() {
+        // Recheck after asynchronous navigation; a failed entry must not consume today's game.
+        if (!driverBeltAllowsEntry()) {
+            endService()
+            return
+        }
         val assigned = destinationVenueMatch ?: return
         val id = UUID.randomUUID().toString()
         val day = clock().atZone(ChallengeRound.seoul).toLocalDate()

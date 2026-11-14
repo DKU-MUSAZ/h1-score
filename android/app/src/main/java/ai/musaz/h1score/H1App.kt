@@ -12,6 +12,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -127,13 +128,25 @@ private val Gold=H1Style.Gold
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
     val historyResult=display==Screen.RESULT && vm.selectedHistoryRecord!=null
+    var challengeHomeKey by rememberSaveable { mutableIntStateOf(0) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    fun openChallengeHome() {
+        if (!vm.parked) return
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+        challengeHomeKey++
+        vm.navigate(Screen.HOME)
+    }
     Row(modifier.background(Paper)) {
         Column(
             Modifier.width(152.dp).fillMaxHeight().background(Color.White)
                 .padding(start = 6.dp, end = 6.dp, top = 28.dp, bottom = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp)
+                .clickable(enabled = vm.parked, role = Role.Button, onClick = ::openChallengeHome),
+                verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.size(34.dp), contentAlignment=Alignment.Center) {
                     Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
                 }
@@ -144,7 +157,10 @@ private val Gold=H1Style.Gold
                 NavItem(
                     "챌린지", R.drawable.ic_nav_challenge,
                     display in listOf(Screen.HOME, Screen.JOURNEY, Screen.RESULT) && !historyResult, vm.parked
-                ) { vm.navigate(if (vm.activeJourney) Screen.JOURNEY else Screen.HOME) }
+                ) {
+                    if (display != Screen.HOME && vm.activeJourney) vm.navigate(Screen.JOURNEY)
+                    else openChallengeHome()
+                }
                 NavItem("내 기록", R.drawable.ic_nav_history, display == Screen.HISTORY || historyResult, vm.parked) {
                     vm.navigate(Screen.HISTORY)
                 }
@@ -197,7 +213,7 @@ private val Gold=H1Style.Gold
             AnimatedContent(targetState=display,modifier=Modifier.weight(1f).fillMaxWidth(),transitionSpec={ (fadeIn(tween(220))+slideInHorizontally { it/25 }) togetherWith fadeOut(tween(120)) },label="screen") { screen ->
                 Box(Modifier.fillMaxSize()) {
                     when(screen) {
-                        Screen.HOME -> ChallengeHomeScreen(vm)
+                        Screen.HOME -> key(challengeHomeKey) { ChallengeHomeScreen(vm) }
                         Screen.JOURNEY -> Journey(vm)
                         Screen.RESULT -> ResultScreen(vm) { badgeReveal=true }
                         Screen.WALLET -> Wallet(vm)
@@ -404,10 +420,11 @@ internal fun LiveRouteChallengeDialog(
                 keyboardActions=KeyboardActions(onSearch={confirmNavigationSearch()}),
                 leadingIcon={Icon(Icons.Outlined.Search,null)},
                 trailingIcon={if(query.isNotEmpty()) IconButton(onClick={query=""}) { Icon(Icons.Outlined.Close,"검색어 지우기") }},
-                placeholder={Text("챌린지 장소 검색")},shape=RoundedCornerShape(28.dp),
+                placeholder={Text("챌린지 장소 검색", fontSize = 23.sp)},shape=RoundedCornerShape(28.dp),
+                textStyle=LocalTextStyle.current.copy(fontSize = 23.sp),
                 colors=OutlinedTextFieldDefaults.colors(focusedContainerColor=Color.White,unfocusedContainerColor=Color.White,
                     focusedBorderColor=Green,unfocusedBorderColor=Color.Transparent),
-                modifier=Modifier.fillMaxWidth().padding(top=10.dp))
+                modifier=Modifier.fillMaxWidth().padding(top=10.dp).heightIn(min = 72.dp))
         }
         if (showKakao) Surface(Modifier.align(Alignment.BottomEnd).padding(14.dp),shape=RoundedCornerShape(20.dp),color=Color.White) {
             Column {
@@ -468,43 +485,86 @@ internal fun LiveRouteChallengeDialog(
 ) {
     val isHangang = destination == hangangChallenge
     val title = if (isHangang) "여의도 한강공원" else destination.name
-    Modal("이 목적지로 챌린지에 참가할까요?", "$title · 참가 예시 ${destination.demoPeers}명", onDismiss) {
-        if (place != null) Text("내비 목적지 · ${place.name}", color=Ink, fontWeight=FontWeight.SemiBold)
-        Text(if (vm.demo && !isHangang && place == null) "예약 후 ‘시연 주행 재생’을 누르면 가상 주행이 시작돼요. 도착 후 결과를 볼 수 있어요."
-            else "길 안내를 시작하고 남은 경로가 10km에 들어오면 자동으로 기록해요. 도착 후 주차하면 결과를 볼 수 있어요.",
-            color=Muted,modifier=Modifier.padding(bottom=18.dp))
-        val beltRequired = !vm.demo && !vm.live.beltConditionMet
-        if (beltRequired) {
-            Text(if(vm.live.belt == false) "예약은 가능해요. 출발 전 운전석과 탑승한 조수석의 벨트를 착용해 주세요."
-                else "운전석 벨트 상태를 확인하고 있어요.",color=Ink,
-                modifier=Modifier.fillMaxWidth().background(PaleMint,RoundedCornerShape(12.dp)).padding(14.dp))
-            Spacer(Modifier.height(12.dp))
-        }
-        if (beltRequired) {
-            OutlinedButton(onClick={
-                onDismiss()
-                if (place != null) vm.navigateToPlace(place) else vm.navigateToChallengeWithoutJoining(destination)
-            },modifier=Modifier.fillMaxWidth()) {
-                Text("길 안내만 열기")
+    val usesNearbyVenue = place != null && place.name.filter(Char::isLetterOrDigit) !=
+        title.filter(Char::isLetterOrDigit)
+    val now = rememberChallengeTime()
+    val round = ChallengeRound.currentOrNext(now)
+    val contentStart = 16.dp
+    Modal("이 목적지로 챌린지에 참가할까요?", "", onDismiss, maxHeight = 740.dp) {
+        if (place != null) {
+            Column(Modifier.fillMaxWidth().padding(start = contentStart, bottom = 12.dp)) {
+                Text("내비 목적지", color = Muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(place.name, color = Ink, fontSize = 29.sp, lineHeight = 34.sp,
+                    fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(8.dp))
         }
-        val canKeepRoute = place == null && !vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup
+        Column(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                .background(Color(0xFFEDF2F7), RoundedCornerShape(16.dp)).padding(horizontal = contentStart, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("챌린지 개최지", color = Muted, fontSize = 14.sp)
+            Text(title, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (usesNearbyVenue && place != null)
+                    "${place.name}에서 1km 이내에 있는 가장 가까운 개최지예요."
+                else "목적지 기준 1km 이내에서 가장 가까운 개최지로 참가해요.",
+                color = Muted, fontSize = 15.sp, lineHeight = 21.sp,
+            )
+            Text("${round.name} 챌린지 · ${round.hoursLabel} (KST)", color = Ink,
+                fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("참가 인원(시연) · ${destination.demoPeers}명", color = Muted, fontSize = 14.sp)
+        }
+        val steps = listOf(
+            if (vm.demo && !isHangang && place == null) "예약 후 ‘시연 주행 재생’을 눌러요."
+            else "참가에 동의하면 내장 내비가 열려요.",
+            "목적지까지 남은 경로가 10km가 되면 안전점수 기록을 시작해요.",
+            "참가 시점과 관계없이 ${round.closingLabel} 전에 도착해야 순위와 마일리지 대상이 돼요.",
+            "같은 회차에 개최지 반경 1km 안을 목적지로 설정한 참가자끼리 점수를 비교해요.",
+            "목적지에 도착해 주차하면 결과를 볼 수 있어요.",
+        )
+        Column(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            steps.forEachIndexed { index, step ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(listOf("①", "②", "③", "④", "⑤")[index], color = Ink, fontSize = 16.sp, lineHeight = 24.sp)
+                    Text(step, color = Ink, fontSize = 16.sp, lineHeight = 24.sp)
+                }
+            }
+        }
+        val beltRequired = !vm.demo && !vm.live.beltConditionMet
+        val canKeepRoute = place == null && !vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired
         if (canKeepRoute) {
-            Text("현재 목적지는 ${vm.matchedVenue?.name} 대회에 배정돼요.", color=Green)
+            Text("현재 목적지는 ${vm.matchedVenue?.name} 대회에 배정돼요.",
+                modifier = Modifier.padding(start = contentStart), color = Green)
         }
         val action = when {
-            !vm.demo -> "동의하고 내비 시작"
+            !vm.demo -> "챌린지 시작"
             isHangang || place != null -> "참가 예약 · 내비 시작"
             else -> "시연 참가 예약"
         }
-        RoundConsent(vm, action, true,
-            if (canKeepRoute) {
-                { round -> onDismiss(); vm.accept(round) }
-            } else null) {
+        RoundConsent(
+            vm, action, !beltRequired,
+            keepRoute = if (canKeepRoute) {
+                { selectedRound -> onDismiss(); vm.accept(selectedRound) }
+            } else null,
+            now = now,
+            showRules = false,
+            beltRequired = beltRequired,
+            contentStart = contentStart,
+        ) {
             onDismiss()
             if (place == null) vm.joinMapChallenge(it, destination)
             else vm.joinDestinationChallenge(it, destination, place)
+        }
+        HorizontalDivider(Modifier.padding(vertical = 10.dp), color = Line)
+        OutlinedButton(onClick = {
+            onDismiss()
+            if (place != null) vm.navigateToPlace(place) else vm.navigateToChallengeWithoutJoining(destination)
+        }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = contentStart)) {
+            Text("길 안내만 열기", modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -525,27 +585,46 @@ internal fun LiveRouteChallengeDialog(
     action: String,
     enabled: Boolean,
     keepRoute: ((ChallengeRound) -> Unit)? = null,
+    now: Instant = rememberChallengeTime(),
+    showRules: Boolean = true,
+    beltRequired: Boolean = !vm.demo && !vm.live.beltConditionMet,
+    contentStart: Dp? = null,
     onJoin: (ChallengeRound) -> Unit,
 ) {
-    val now = rememberChallengeTime()
     val round = ChallengeRound.currentOrNext(now)
     var consent by remember(round) { mutableStateOf(false) }
     val open = round.contains(now)
-    Text("${round.name} 챌린지 · ${round.hoursLabel} (한국 시간)", color=Ink, fontWeight=FontWeight.Bold)
-    Text("중간에 참가해도 마감은 ${round.closingLabel}예요. 마감 시각 전에 도착하지 못하면 순위와 마일리지 대상에서 제외돼요.",
-        color=Ink, modifier=Modifier.padding(top=8.dp))
-    Text("같은 회차에 챌린지 장소에서 직선거리 1km 이내를 목적지로 설정한 참가자끼리 비교해요.",
-        color=Muted, modifier=Modifier.padding(top=6.dp))
+    if (showRules) {
+        Text("${round.name} 챌린지 · ${round.hoursLabel} (한국 시간)", color=Ink, fontWeight=FontWeight.Bold)
+        Text("참가 시점과 관계없이 ${round.closingLabel} 전에 도착해야 순위와 마일리지 대상이 돼요.",
+            color=Ink, modifier=Modifier.padding(top=8.dp))
+        Text("같은 회차에 개최지 반경 1km 안을 목적지로 설정한 참가자끼리 점수를 비교해요.",
+            color=Muted, modifier=Modifier.padding(top=6.dp))
+    }
     if (!open) Text(if (vm.demo) "시연은 다음 회차 시작 시각부터 재현해요." else "다음 회차 시작 전이에요.", color=Green)
     Row(Modifier.fillMaxWidth().toggleable(value=consent, role=androidx.compose.ui.semantics.Role.Checkbox,
         onValueChange={consent=it}), verticalAlignment=Alignment.CenterVertically) {
-        Checkbox(consent, onCheckedChange=null, modifier=Modifier.padding(12.dp))
+        Checkbox(consent, onCheckedChange = null,
+            modifier = Modifier.padding(start = if (contentStart == null) 12.dp else 0.dp, top = 12.dp, end = 12.dp, bottom = 12.dp))
         Text("마감 및 참가 조건에 동의합니다", color=Ink)
     }
-    val canSubmit = enabled && consent && (open || vm.demo)
-    Primary(action, enabled=canSubmit) { onJoin(round) }
-    if (keepRoute != null) OutlinedButton(onClick={keepRoute(round)}, enabled=canSubmit, modifier=Modifier.fillMaxWidth()) {
-        Text("현재 목적지로 참가")
+    val canSubmit = enabled && !beltRequired && consent && (open || vm.demo)
+    Primary(action, enabled = canSubmit, contentStart = contentStart ?: 20.dp) { onJoin(round) }
+    if (beltRequired) {
+        val warningColor = MaterialTheme.colorScheme.error
+        Row(
+            Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, modifier = Modifier.size(16.dp),
+                tint = warningColor)
+            Text("운전석 안전벨트를 착용해야 챌린지를 시작할 수 있어요.", color = warningColor, fontSize = 14.sp)
+        }
+    }
+    if (keepRoute != null) OutlinedButton(onClick = { keepRoute(round) }, enabled = canSubmit,
+        modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = contentStart ?: 24.dp)) {
+        Text("현재 목적지로 참가", modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -974,8 +1053,9 @@ internal fun LiveRouteChallengeDialog(
     }
 }
 
-@Composable private fun Primary(label:String,icon:ImageVector=Icons.Outlined.ArrowForward,enabled:Boolean=true,action:()->Unit) {
-    Button(onClick=action,enabled=enabled,modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(14.dp),colors=ButtonDefaults.buttonColors(containerColor=Ink,contentColor=Color.White),contentPadding=PaddingValues(horizontal=20.dp)) {
+@Composable private fun Primary(label:String,icon:ImageVector=Icons.Outlined.ArrowForward,enabled:Boolean=true,
+    contentStart:Dp=20.dp,action:()->Unit) {
+    Button(onClick=action,enabled=enabled,modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(14.dp),colors=ButtonDefaults.buttonColors(containerColor=Ink,contentColor=Color.White),contentPadding=PaddingValues(start=contentStart,end=20.dp)) {
         Text(label,fontSize=16.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));Icon(icon,null,Modifier.size(21.dp))
     }
 }
@@ -1024,12 +1104,18 @@ internal fun LiveRouteChallengeDialog(
         }
     }
 }
-@Composable internal fun Modal(title:String,subtitle:String,dismiss:()->Unit,body:@Composable ColumnScope.()->Unit) {
+@Composable internal fun Modal(title:String,subtitle:String,dismiss:()->Unit,maxHeight:Dp=640.dp,
+    body:@Composable ColumnScope.()->Unit) {
     Dialog(onDismissRequest=dismiss,properties=DialogProperties(usePlatformDefaultWidth=false)) {
-        Surface(Modifier.width(620.dp).heightIn(max=640.dp),shape=RoundedCornerShape(28.dp),color=Color.White) {
+        Surface(Modifier.width(620.dp).heightIn(max=maxHeight),shape=RoundedCornerShape(28.dp),color=Color.White) {
             Column(Modifier.padding(30.dp).verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment=Alignment.CenterVertically) { Text(title,Modifier.weight(1f),fontSize=26.sp,fontWeight=FontWeight.Bold);IconButton(onClick=dismiss) { Icon(Icons.Outlined.Close,"닫기") } }
-                Text(subtitle,fontSize=14.sp,color=Muted,modifier=Modifier.padding(top=4.dp,bottom=24.dp));body()
+                if (subtitle.isNotBlank()) {
+                    Text(subtitle, fontSize = 14.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 24.dp))
+                } else {
+                    Spacer(Modifier.height(12.dp))
+                }
+                body()
             }
         }
     }

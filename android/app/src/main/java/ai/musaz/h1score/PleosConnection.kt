@@ -93,7 +93,8 @@ data class LiveVehicle(
     fun freshBelt(now: Long): Boolean? = belt.takeIf { now - beltAt in 0..2500 } ?:
         if (beltWarningOnAt?.let { now-it in 0..2500 } == true) false
         else if (beltWarningOffAt?.let { now-it in 0..2500 } == true) true else null
-    val beltConditionMet: Boolean get() = freshBelt(SystemClock.elapsedRealtime()) == true
+    // A silent warning is not proof of a fastened belt while parked.
+    val beltConditionMet: Boolean get() = belt == true && SystemClock.elapsedRealtime() - beltAt in 0..2500
     fun freshSpeed(now: Long) = speedMps.takeIf { now - speedAt in 0..2_500 }
     fun freshLimit(now: Long) = limitKph.takeIf { now - limitAt in 0..NAVIGATION_SPEED_LIMIT_MAX_AGE_MS }
 }

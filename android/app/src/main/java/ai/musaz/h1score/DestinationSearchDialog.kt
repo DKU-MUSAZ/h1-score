@@ -23,15 +23,26 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-private data class PlaceSearchResult(val place: SavedPlace, val address: String)
+internal data class PlaceSearchResult(val place: SavedPlace, val address: String)
 
 @Composable
-internal fun DestinationSearchDialog(vm: ChallengeViewModel, keyword: String, onDismiss: () -> Unit) {
+internal fun DestinationSearchDialog(
+    vm: ChallengeViewModel,
+    keyword: String,
+    openUnresolvedInNavigation: Boolean = false,
+    onDismiss: () -> Unit,
+) {
     var results by remember(keyword) { mutableStateOf<List<PlaceSearchResult>?>(null) }
     var selected by remember(keyword) { mutableStateOf<SavedPlace?>(null) }
     LaunchedEffect(keyword) {
         val found = findPlaces(keyword)
-        selected = found.singleOrNull()?.place
+        if (found.isEmpty() && openUnresolvedInNavigation) {
+            onDismiss()
+            vm.searchDestination(keyword)
+            return@LaunchedEffect
+        }
+        selected = found.singleOrNull { placeKey(it.place.name).equals(placeKey(keyword), ignoreCase = true) }?.place
+            ?: found.singleOrNull()?.place
         results = found
     }
 
@@ -57,21 +68,11 @@ internal fun DestinationSearchDialog(vm: ChallengeViewModel, keyword: String, on
                 }
             }
         }
-        else -> {
-            val venue = vm.venueFor(place)
-            if (venue != null) {
-                ChallengeEntryDialog(vm, venue, place, onDismiss)
-            } else {
-                NavigationSearchDialog(place.name, onDismiss, onSearch = {
-                    onDismiss()
-                    vm.navigateToPlace(place)
-                }, placeResolved = true)
-            }
-        }
+        else -> ResolvedDestinationDialog(vm, place, onDismiss)
     }
 }
 
-private suspend fun findPlaces(keyword: String): List<PlaceSearchResult> {
+internal suspend fun findPlaces(keyword: String): List<PlaceSearchResult> {
     if (BuildConfig.KAKAO_LOCAL_REST_API_KEY.isNotBlank()) {
         val results = withContext(Dispatchers.IO) {
             try {
@@ -85,13 +86,50 @@ private suspend fun findPlaces(keyword: String): List<PlaceSearchResult> {
         if (results.isNotEmpty()) return results
     }
 
-    // Coordinates previously received from Pleos for the two prototype search examples.
-    val place = when (keyword.filter(Char::isLetterOrDigit)) {
-        "더현대서울" -> SavedPlace.from("더현대 서울", GeoPoint(37.5259, 126.9284))
-        "서울역" -> SavedPlace.from("서울역", GeoPoint(37.5547, 126.9707))
-        else -> null
+    val normalized = placeKey(keyword)
+    if (normalized.isBlank()) return emptyList()
+    return (registeredChallengePlaces + prototypePlaces).filter {
+        placeKey(it.place.name).contains(normalized, ignoreCase = true)
+    }.take(5)
+}
+
+private fun placeKey(name: String): String = name.filter(Char::isLetterOrDigit)
+
+private val registeredChallengePlaces: List<PlaceSearchResult>
+    get() = challengeSpots.mapNotNull { spot ->
+        val name = if (spot == hangangChallenge) "여의도 한강공원" else spot.name
+        SavedPlace.from(name, spot.point)?.let { PlaceSearchResult(it, spot.area) }
     }
-    return listOfNotNull(place?.let { PlaceSearchResult(it, "") })
+
+internal fun registeredChallengePlace(keyword: String): SavedPlace? =
+    registeredChallengePlaces.singleOrNull {
+        placeKey(it.place.name).equals(placeKey(keyword), ignoreCase = true)
+    }?.place
+
+private val prototypePlaces = listOfNotNull(
+    SavedPlace.from("더현대 서울", GeoPoint(37.5259, 126.9284))?.let { PlaceSearchResult(it, "서울 영등포구 여의대로 108") },
+    // Public directions coordinates from Seoul's Hangang park directory.
+    SavedPlace.from("뚝섬 한강공원", GeoPoint(37.52936457, 127.07397816))?.let { PlaceSearchResult(it, "서울 광진구") },
+    SavedPlace.from("반포 한강공원", GeoPoint(37.50769397, 126.99273098))?.let { PlaceSearchResult(it, "서울 서초구") },
+    SavedPlace.from("망원 한강공원", GeoPoint(37.55234296, 126.89988716))?.let { PlaceSearchResult(it, "서울 마포구") },
+    SavedPlace.from("서울역", GeoPoint(37.5547, 126.9707))?.let { PlaceSearchResult(it, "서울 중구 한강대로 405") },
+)
+
+@Composable
+internal fun ResolvedDestinationDialog(
+    vm: ChallengeViewModel,
+    place: SavedPlace,
+    onDismiss: () -> Unit,
+) {
+    val venue = vm.venueFor(place)
+    if (venue != null) {
+        ChallengeEntryDialog(vm, venue, place, onDismiss)
+    } else {
+        NavigationSearchDialog(place.name, onDismiss, onSearch = {
+            onDismiss()
+            vm.navigateToPlace(place)
+        }, placeResolved = true)
+    }
 }
 
 private fun queryKakaoLocal(keyword: String): List<PlaceSearchResult> {
