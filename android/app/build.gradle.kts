@@ -53,6 +53,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("ai.pleos.playground:Vehicle:2.3.2")
+    // Match Vehicle 2.3.2's runtime dependencies for nullable raw seat-state reads.
+    compileOnly("ai.pleos.playground:vehicle-aidl:1.1.1") { isTransitive = false }
+    compileOnly("ai.pleos.playground:vehicle-data:1.1.11") { isTransitive = false }
     implementation("ai.pleos.playground:NaviHelper:3.0.5")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     testImplementation("junit:junit:4.13.2")
