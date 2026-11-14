@@ -41,7 +41,7 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
 ) {
     val frameDensity = LocalDensity.current
     val title = when (section) {
-        SavedDriveDetailSection.FEEDBACK -> "운전점수 산정 내역"
+        SavedDriveDetailSection.FEEDBACK -> if (drive.outcome == DriveOutcome.COMPLETED) "운전점수 산정 내역" else "안전벨트 판정 내역"
         SavedDriveDetailSection.RANKING -> "참가자 순위"
         SavedDriveDetailSection.MILEAGE -> "마일리지 적립 내역"
     }
@@ -67,7 +67,8 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
                                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
-                                when (section) {
+                                if (drive.outcome != DriveOutcome.COMPLETED) SavedBeltOutcomeNotice(drive)
+                                else when (section) {
                                     SavedDriveDetailSection.FEEDBACK -> SavedFeedbackDetails(drive)
                                     SavedDriveDetailSection.RANKING -> SavedRankingDetails(drive)
                                     SavedDriveDetailSection.MILEAGE -> SavedMileageDetails(drive)
@@ -79,6 +80,19 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
             }
         }
     }
+}
+
+@Composable internal fun SavedBeltOutcomeNotice(drive: CompletedDrive) {
+    Text(drive.outcome.label, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+    drive.beltOutcomeReason?.let { reason ->
+        Text(reason, fontSize = 20.sp, lineHeight = 28.sp, color = H1Style.Ink)
+    }
+    Text("이 주행은 점수와 순위를 산정하지 않으며 마일리지·배지 적립에서 제외돼요.",
+        fontSize = 18.sp, lineHeight = 28.sp, color = H1Style.Muted)
+    Text(if (drive.outcome == DriveOutcome.DISQUALIFIED)
+        "출발 전 운전석과 탑승자가 있는 조수석의 안전벨트를 확인해 주세요."
+    else "안전벨트와 주행 데이터가 확인되지 않은 구간이 있어 개인 기록으로만 보관해요.",
+        fontSize = 16.sp, lineHeight = 24.sp, color = H1Style.Muted)
 }
 
 @Composable private fun SavedFeedbackDetails(drive: CompletedDrive) {

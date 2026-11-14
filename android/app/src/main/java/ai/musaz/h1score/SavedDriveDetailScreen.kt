@@ -22,6 +22,10 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 internal fun SavedDriveDetailScreen(drive: CompletedDrive, onBack: () -> Unit) {
+    if (drive.outcome != DriveOutcome.COMPLETED) {
+        SavedBeltOutcomeScreen(drive, onBack)
+        return
+    }
     var details by remember(drive.session.id) { mutableStateOf<SavedDriveDetailSection?>(null) }
     val report = drive.report
     val feedback = remember(report) { historyFeedback(report) }
@@ -117,6 +121,34 @@ internal fun SavedDriveDetailScreen(drive: CompletedDrive, onBack: () -> Unit) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    details?.let { SavedDriveDetailDialog(drive, it) { details = null } }
+}
+
+@Composable
+private fun SavedBeltOutcomeScreen(drive: CompletedDrive, onBack: () -> Unit) {
+    var details by remember(drive.session.id) { mutableStateOf<SavedDriveDetailSection?>(null) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "기록 목록으로") }
+            Column(Modifier.weight(1f)) {
+                Text(drive.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+                Text(historyDateLabel(drive.completedAtEpochMs), fontSize = 16.sp, color = H1Style.Muted)
+            }
+        }
+        Surface(Modifier.fillMaxWidth(), color = Color.White, shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.padding(28.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                SavedBeltOutcomeNotice(drive)
+                Text("기록된 분석 거리 ${"%.1f".format(drive.report.validDistanceM / 1000)} km",
+                    fontSize = 16.sp, color = H1Style.Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    TextButton(onClick = { details = SavedDriveDetailSection.FEEDBACK }) { Text("판정 자세히 보기") }
+                    TextButton(onClick = { details = SavedDriveDetailSection.RANKING }) { Text("순위 자세히 보기") }
+                    TextButton(onClick = { details = SavedDriveDetailSection.MILEAGE }) { Text("마일리지 자세히 보기") }
                 }
             }
         }

@@ -117,7 +117,7 @@ import ai.musaz.h1score.core.ChallengeRound
     val grouped = remember(records) {
         records.filter { historyDate(it.completedAtEpochMs) != null }
             .groupBy { historyDate(it.completedAtEpochMs)!! }
-            .mapValues { (_, items) -> historyByDate(items, HistoryDateOrder.OLDEST_FIRST).map { it.report.score } }
+            .mapValues { (_, items) -> historyByDate(items, HistoryDateOrder.OLDEST_FIRST) }
     }
     val today = LocalDate.now(ChallengeRound.seoul)
     BoxWithConstraints(modifier) {
@@ -188,7 +188,7 @@ import ai.musaz.h1score.core.ChallengeRound
                                     }.semantics(mergeDescendants = true) {
                                         contentDescription = "${date.year}년 ${date.monthValue}월 ${date.dayOfMonth}일"
                                         selected = chosen
-                                        stateDescription = if (scores.isEmpty()) "주행 기록 없음" else "${scores.size}경기 · ${historyDayScores(scores)}"
+                                        stateDescription = if (scores.isEmpty()) "주행 기록 없음" else "${scores.size}경기 · ${historyDayResults(scores)}"
                                     }, horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center) {
                                     val diameter = if (compact) 38.dp else 46.dp
@@ -202,7 +202,7 @@ import ai.musaz.h1score.core.ChallengeRound
                                     }
                                     // Equal score space keeps numerals aligned even on empty dates.
                                     Box(Modifier.height(if (compact) 30.dp else 42.dp).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                                        if (scores.isNotEmpty()) Text(historyDayScores(scores),
+                                        if (scores.isNotEmpty()) Text(historyDayResults(scores),
                                             Modifier.graphicsLayer { alpha = progress },
                                             fontSize = if (compact) 13.sp else 17.sp,
                                             lineHeight = if (compact) 15.sp else 20.sp,

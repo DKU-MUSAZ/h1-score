@@ -11,6 +11,27 @@ import java.util.Locale
 
 internal enum class HistoryDateOrder { NEWEST_FIRST, OLDEST_FIRST }
 
+internal fun historyResultLabel(drive: CompletedDrive): String = when (drive.outcome) {
+    DriveOutcome.COMPLETED -> drive.report.score?.let { "${it}점" } ?: "미확정"
+    else -> drive.outcome.label
+}
+
+internal val CompletedDrive.beltOutcomeReason: String?
+    get() = when (outcome) {
+        DriveOutcome.COMPLETED -> null
+        DriveOutcome.DISQUALIFIED -> beltFailureReason?.label ?: "주행 중 안전벨트 미착용이 확인되었어요."
+        DriveOutcome.UNVERIFIABLE -> beltFailureReason?.label ?: "주행 중 안전벨트 상태를 확인할 수 없었어요."
+    }
+
+internal fun historyDayResults(records: List<CompletedDrive>): String {
+    if (records.all { it.outcome == DriveOutcome.COMPLETED }) return historyDayScores(records.map { it.report.score })
+    val shown = records.take(2)
+    val text = if (shown.all { it.outcome == DriveOutcome.COMPLETED && it.report.score != null }) {
+        historyDayScores(shown.map { it.report.score })
+    } else shown.joinToString(" · ", transform = ::historyResultLabel)
+    return text + if (records.size > 2) "\n외 ${records.size - 2}경기" else ""
+}
+
 internal fun historyMonthDays(month: YearMonth): List<LocalDate> {
     val first = month.atDay(1).with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
     val last = month.atEndOfMonth().with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY))

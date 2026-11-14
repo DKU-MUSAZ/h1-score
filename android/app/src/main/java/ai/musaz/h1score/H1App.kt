@@ -826,6 +826,7 @@ internal fun LiveRouteChallengeDialog(
             distance = "${"%.1f".format(record.report.validDistanceM / 1000)} km",
             header = false,
             score = record.report.score,
+            outcome = record.outcome,
         )
     }
 }
@@ -836,6 +837,7 @@ internal fun LiveRouteChallengeDialog(
     distance: String,
     header: Boolean,
     score: Int? = null,
+    outcome: DriveOutcome = DriveOutcome.COMPLETED,
 ) {
     val color = if (header) Muted else Ink
     val metadataColor = if (header) Muted else lerp(Ink, Muted, .8f)
@@ -854,6 +856,7 @@ internal fun LiveRouteChallengeDialog(
         Box(Modifier.width(104.dp), contentAlignment = Alignment.CenterEnd) {
             when {
                 header -> Text("점수", Modifier.padding(end = 14.dp), fontSize = fontSize, color = color)
+                outcome != DriveOutcome.COMPLETED -> Text(outcome.label, fontSize = 18.sp, color = Ink)
                 score == null -> Text("미확정", fontSize = 15.sp, color = Muted)
                 else -> Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(score.toString(), Modifier.alignByBaseline(), fontSize = 31.sp, lineHeight = 35.sp,
