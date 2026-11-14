@@ -14,6 +14,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -28,6 +30,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -87,7 +90,7 @@ private val Gold=H1Style.Gold
             Phase.RECORDING -> "주행 기록 중"
             Phase.AWAITING_PARK -> "주차 후 결과 공개"
             Phase.CANCELLED -> "기록 종료"
-            Phase.DISQUALIFIED -> "안전벨트 미착용 · 실격"
+            Phase.DISQUALIFIED -> if (vm.missedDeadline) "시간 초과 · 실격" else "안전벨트 미착용 · 실격"
             Phase.FINISHED -> "기록 완료"
             else -> "이번 목적지"
         },PaleMint,Green)
@@ -117,8 +120,10 @@ private val Gold=H1Style.Gold
     var simulator by remember { mutableStateOf(false) }
     var badgeReveal by remember { mutableStateOf(false) }
     var historyDateOrder by rememberSaveable { mutableStateOf(HistoryDateOrder.NEWEST_FIRST) }
-    var historySelectedDate by rememberSaveable { mutableStateOf<String?>(null) }
-    var historyMonth by rememberSaveable { mutableStateOf(initialHistoryMonth(vm.completedDrives).toString()) }
+    var historySelectedDate by rememberSaveable(vm.demo) { mutableStateOf<String?>(null) }
+    var historyWeek by rememberSaveable(vm.demo) { mutableStateOf<String?>(null) }
+    var historyMonthly by rememberSaveable(vm.demo) { mutableStateOf(false) }
+    var historyMonth by rememberSaveable(vm.demo) { mutableStateOf<String?>(null) }
     LaunchedEffect(vm.parked) { if(!vm.parked) { destinations=false; simulator=false; badgeReveal=false } }
     LaunchedEffect(vm.notice) { if(vm.notice!=null) { kotlinx.coroutines.delay(3500); vm.notice=null } }
     val display=if(!vm.parked) Screen.JOURNEY else vm.screen
@@ -141,7 +146,7 @@ private val Gold=H1Style.Gold
         ) {
             Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal=8.dp)
                 .clickable(enabled = vm.parked, role = Role.Button, onClick = ::openChallengeHome),
-                verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.size(34.dp), contentAlignment=Alignment.Center) {
                     Image(painterResource(R.drawable.app_icon), null, Modifier.size(32.dp))
                 }
@@ -185,6 +190,18 @@ private val Gold=H1Style.Gold
                     Screen.PROFILE -> "마이페이지"
                     Screen.CONNECTION -> "연결 상태"
                 },modifier=Modifier.semantics { heading() },color=Ink,fontWeight=FontWeight.Bold,fontSize=32.sp,letterSpacing=(-.8).sp)
+                if (display == Screen.HISTORY) {
+                    Spacer(Modifier.width(24.dp))
+                    HistoryViewControls(historyMonthly, historyDateOrder, onMonthlyChange = { monthly ->
+                        if (monthly && !historyMonthly) {
+                            val date = historySelectedDate?.let(LocalDate::parse)
+                                ?: historyWeek?.let(LocalDate::parse)?.plusDays(3)
+                                ?: initialHistoryWeek(vm.historyDrives).plusDays(3)
+                            historyMonth = YearMonth.from(date).toString()
+                        }
+                        historyMonthly = monthly
+                    }, onDateOrder = { historyDateOrder = it })
+                }
                 Spacer(Modifier.weight(1f))
                 Icon(if(vm.parked) Icons.Outlined.LocalParking else Icons.Outlined.DirectionsCar,null,Modifier.size(17.dp),tint=Green)
                 Text(if(vm.parked) " 주차 중" else " 주행 모드",color=Green,fontSize=13.sp,fontWeight=FontWeight.Medium)
@@ -211,8 +228,18 @@ private val Gold=H1Style.Gold
                             onChallenge = { vm.navigate(Screen.HOME) }
                         )
                         Screen.HISTORY -> History(vm,historyDateOrder,{ historyDateOrder=it },
-                            historySelectedDate?.let(LocalDate::parse),{ historySelectedDate=it?.toString() },
-                            YearMonth.parse(historyMonth),{ historyMonth=it.toString() })
+                            historySelectedDate?.let(LocalDate::parse),{ date ->
+                                historySelectedDate = date?.toString()
+                                if (date != null) historyWeek = historyWeekStart(date).toString()
+                            },
+                            historyWeek?.let(LocalDate::parse) ?: initialHistoryWeek(vm.historyDrives),
+                            { nextWeek ->
+                                val currentWeek = historyWeek?.let(LocalDate::parse) ?: initialHistoryWeek(vm.historyDrives)
+                                if (nextWeek != currentWeek) historySelectedDate = null
+                                historyWeek = nextWeek.toString()
+                            }, historyMonthly,
+                            historyMonth?.let(YearMonth::parse) ?: YearMonth.from(initialHistoryWeek(vm.historyDrives).plusDays(3)),
+                            { historyMonth=it.toString() }, { historyMonthly=false })
                         Screen.CONNECTION -> ConnectionScreen(vm)
                         Screen.PROFILE -> MyProfileScreen(vm,display==Screen.PROFILE && vm.parked)
                     }
@@ -287,7 +314,7 @@ private val Gold=H1Style.Gold
             .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
             .alpha(if (enabled) 1f else .45f)
             .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
@@ -344,8 +371,8 @@ internal fun LiveRouteChallengeDialog(
 ) {
     Modal("$venueName 대회 참가", "내비 목적지 · $destinationName", onDismiss) {
         Text("현재 목적지로 길 안내를 계속하면서 이 챌린지에 참가해요.", color = Muted)
-        if (!vm.live.beltConditionMet) Text("운전석 벨트 상태를 확인해 주세요.", color = Muted)
-        RoundConsent(vm, "동의하고 참가", vm.live.beltConditionMet) { round ->
+        if (!vm.live.beltConditionMet) Text("출발 전 운전석과 탑승한 조수석의 벨트를 착용해 주세요.", color = Muted)
+        RoundConsent(vm, "동의하고 참가", true) { round ->
             vm.accept(round)
             if (vm.activeJourney) onDismiss()
         }
@@ -560,7 +587,7 @@ internal fun LiveRouteChallengeDialog(
     keepRoute: ((ChallengeRound) -> Unit)? = null,
     now: Instant = rememberChallengeTime(),
     showRules: Boolean = true,
-    beltRequired: Boolean = false,
+    beltRequired: Boolean = !vm.demo && !vm.live.beltConditionMet,
     contentStart: Dp? = null,
     onJoin: (ChallengeRound) -> Unit,
 ) {
@@ -610,13 +637,13 @@ internal fun LiveRouteChallengeDialog(
     Column(Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)).background(Ink).padding(34.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(if(waiting) Color(0xFFD8C394) else Mint,CircleShape))
-            Text(if(idle) "차량 상태 확인 중" else if(disqualified) "안전벨트 미착용 · 실격" else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
+            Text(if(idle) "차량 상태 확인 중" else if(disqualified) { if(vm.missedDeadline) "시간 초과 · 실격" else "안전벨트 미착용 · 실격" } else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
             Spacer(Modifier.weight(1f))
             Text(vm.destinationName,color=Color(0xFFB7C7D8),fontSize=15.sp)
         }
         Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
-                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->"안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
+                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->if(vm.missedDeadline) "대회 종료 후 도착해\n실격 처리됐어요" else "안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
                 Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";disqualified->"이번 점수·순위·보상은 지급하지 않아요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
                 Spacer(Modifier.height(35.dp))
                 Row(verticalAlignment=Alignment.Bottom) {
@@ -634,6 +661,7 @@ internal fun LiveRouteChallengeDialog(
         Row(Modifier.fillMaxWidth().padding(top=17.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(if(waiting) "기록 시작까지 ${"%.1f".format(((vm.remainingM-10000)/1000).coerceAtLeast(0.0))} km" else if(arrived) "결과 공개 대기" else "안전한 곳까지 평소처럼 운전해 주세요",color=Color(0xFFAFBDCC),fontSize=13.sp)
             Spacer(Modifier.weight(1f))
+            if (vm.parked && disqualified) Button(onClick=vm::openCompletedResult) { Text("실격 기록 보기") }
             if(vm.parked && vm.activeJourney) {
                 TextButton(onClick=vm::cancel) { Text("참가 취소",color=Color(0xFFAFBDCC)) }
                 if(vm.consoleTest) Button(onClick=vm::finishConsoleTest) { Text("콘솔 시험 종료") }
@@ -762,6 +790,7 @@ internal fun LiveRouteChallengeDialog(
     val ranking=saved?.ranking ?: vm.ranking
     val missedDeadline=saved?.missedDeadline ?: vm.missedDeadline
     val earned=saved?.earned ?: vm.earned
+    val badgeMileage = saved?.badgeMileage ?: vm.badgeMileageEarned
     Surface(Modifier.fillMaxWidth().padding(top=12.dp),color=Color.White,shape=RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -771,7 +800,7 @@ internal fun LiveRouteChallengeDialog(
             }
             Text(if(saved==null && vm.consoleTest) "실제 SDK 차속으로 점수 로직 시험" else if(demo) "같은 회차 · 챌린지 반경 1km" else "실제 서버 매칭은 준비 중이에요",fontSize=11.sp,color=Muted,modifier=Modifier.padding(top=7.dp,bottom=12.dp))
             if(ranking.isEmpty()) {
-                Text(if(saved==null && vm.consoleTest) "시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정 · 내 기록·주간 점수·배지·보상에 반영하지 않아요." else if(!demo) "이번 기록은 개인 결과로 확인해요. 실제 경쟁·보상은 서버 연결 후 제공해요."
+                Text(if(saved==null && vm.consoleTest) "시험 제한속도 ${vm.consoleSessionLimitKph}km/h · 벨트 착용 가정 · 내 기록·주간 점수·배지·보상에 반영하지 않아요." else if(!demo) "이번 기록은 개인 결과로 확인해요. 실제 순위 보상은 서버 연결 후 제공해요."
                     else if(missedDeadline) "마감 이후에 도착해 개인 기록만 표시해요."
                     else "보상 순위에 필요한 거리·데이터 조건을 채우지 못했어요.",fontSize=14.sp,lineHeight=22.sp,color=Muted)
             } else ranking.forEach {row ->
@@ -784,7 +813,11 @@ internal fun LiveRouteChallengeDialog(
             }
             HorizontalDivider(Modifier.padding(top=8.dp),color=Line)
             Row(Modifier.fillMaxWidth().padding(top=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                Column { Text("이번에 쌓인 마일리지",fontSize=12.sp,color=Muted);Text("+${earned} M",fontSize=25.sp,fontWeight=FontWeight.Bold,color=Green,modifier=Modifier.padding(top=2.dp)) }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("이번에 쌓인 마일리지", fontSize = 12.sp, color = Muted)
+                    Text("순위 보상 +${earned}M", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Green)
+                    Text("배지 보상 +${badgeMileage}M", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Green)
+                }
                 Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick={vm.navigate(Screen.WALLET)},shape=RoundedCornerShape(12.dp),colors=ButtonDefaults.filledTonalButtonColors(containerColor=PaleMint,contentColor=Green)) { Text("내 마일리지");Icon(Icons.Outlined.ChevronRight,null,Modifier.size(18.dp)) }
             }
@@ -793,80 +826,126 @@ internal fun LiveRouteChallengeDialog(
 }
 
 @Composable private fun History(
-    vm:ChallengeViewModel,dateOrder:HistoryDateOrder,onDateOrder:(HistoryDateOrder)->Unit,
-    selectedDate:LocalDate?,onDateSelected:(LocalDate?)->Unit,
-    month:YearMonth,onMonthChange:(YearMonth)->Unit,
+    vm: ChallengeViewModel,
+    dateOrder: HistoryDateOrder,
+    onDateOrder: (HistoryDateOrder) -> Unit,
+    selectedDate: LocalDate?,
+    onDateSelected: (LocalDate?) -> Unit,
+    week: LocalDate,
+    onWeekChange: (LocalDate) -> Unit,
+    monthly: Boolean,
+    month: YearMonth,
+    onMonthChange: (YearMonth) -> Unit,
+    onCollapse: () -> Unit,
 ) {
-    if(vm.completedDrives.isEmpty()) { EmptyState("첫 드라이브를 기다리고 있어요","참가한 이동의 주행습관과 결과를 이곳에 모아드릴게요.") { vm.navigate(Screen.HOME) };return }
-    val records=remember(vm.completedDrives,dateOrder,selectedDate) { historyByDate(historyForDay(vm.completedDrives,selectedDate),dateOrder) }
-    val recordDates=remember(vm.completedDrives) { vm.completedDrives.mapNotNull { historyDate(it.completedAtEpochMs) }.toSet() }
-    val calendarWidth=368.dp
-    val columnSpacing=20.dp
-    val chipSpacing=8.dp
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(bottom=12.dp),horizontalArrangement=Arrangement.spacedBy(columnSpacing),verticalAlignment=Alignment.CenterVertically) {
-            Text("저장된 주행 기록",Modifier.width(calendarWidth),color=Muted,fontSize=14.sp)
-            Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
-                Text(selectedDate?.let { "${it.year}.${"%02d".format(it.monthValue)}.${"%02d".format(it.dayOfMonth)} · ${records.size}건" }
-                    ?: "전체 ${records.size}건",color=Muted,fontSize=14.sp)
-                Spacer(Modifier.weight(1f))
-                Row(horizontalArrangement=Arrangement.spacedBy(chipSpacing)) {
-                    FilterChip(selected=selectedDate==null,onClick={onDateSelected(null)},label={Text("전체 기록")})
-                    Row(Modifier.selectableGroup(),horizontalArrangement=Arrangement.spacedBy(chipSpacing)) {
-                        listOf(HistoryDateOrder.NEWEST_FIRST to "최신순",HistoryDateOrder.OLDEST_FIRST to "오래된순").forEach { (order,label) ->
-                            FilterChip(selected=dateOrder==order,onClick={onDateOrder(order)},label={Text(label)},
-                                leadingIcon=if(dateOrder==order) { { Icon(Icons.Outlined.Check,null,Modifier.size(18.dp)) } } else null)
-                        }
-                    }
+    val historyDrives = vm.historyDrives
+    val records = remember(historyDrives, dateOrder, selectedDate, week) {
+        historyByDate(historyForDay(historyForWeek(historyDrives, week), selectedDate), dateOrder)
+    }
+    HistoryCalendarPanel(monthly, month, week, selectedDate, historyDrives,
+        onMonthChange, onWeekChange, onDateSelected, onCollapse, Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                selectedDate?.let { "${it.year}.${"%02d".format(it.monthValue)}.${"%02d".format(it.dayOfMonth)} · ${records.size}건" }
+                    ?: "이 주 기록 · ${records.size}건",
+                Modifier.weight(1f),
+                color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
+            if (selectedDate != null) {
+                TextButton(onClick = { onDateSelected(null) }) {
+                    Text("이 주 전체 보기", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        Row(Modifier.weight(1f).fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(columnSpacing),verticalAlignment=Alignment.Top) {
-            HistoryCalendar(month,selectedDate,recordDates,onMonthChange,{onDateSelected(it)},
-                Modifier.width(calendarWidth).verticalScroll(rememberScrollState()))
-            key(selectedDate,dateOrder) {
-                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                    if(records.isEmpty()) {
-                        Surface(color=Color.White,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth()) {
+        if (records.isNotEmpty()) {
+            HistoryRecordColumns("목적지", "주행일", "주행거리", header = true)
+        }
+        key(selectedDate, dateOrder, week) {
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth().testTag("history-record-list"),
+                contentPadding = PaddingValues(bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (records.isEmpty()) {
+                    item {
+                        val firstDrive = historyDrives.isEmpty()
+                        Surface(color = Color.White, shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(28.dp)) {
-                                Text("이날은 주행 기록이 없어요",fontSize=20.sp,fontWeight=FontWeight.Bold,color=Ink)
-                                Text("다른 날짜를 선택하거나 전체 기록을 확인해 주세요.",color=Muted,fontSize=14.sp,lineHeight=22.sp,modifier=Modifier.padding(top=8.dp))
-                            }
-                        }
-                    }
-                    records.forEach { record ->
-                        key(record.session.id) {
-                            Surface(
-                                onClick = { vm.openHistoryRecord(record.session.id) },
-                                color = Color.White, shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                ) {
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                        Text(record.name, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                        Text(historyDateLabel(record.completedAtEpochMs), color = Muted, fontSize = 13.sp)
-                                        Text("${"%.1f".format(record.report.validDistanceM / 1000)} km  /  ${if (record.demo) "시연" else "차량 기록"}",
-                                            color = Muted, fontSize = 13.sp)
+                                Text(if (firstDrive) "첫 드라이브를 기다리고 있어요" else if (selectedDate == null) "이 주에는 주행 기록이 없어요" else "이날은 주행 기록이 없어요",
+                                    fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
+                                Text(if (firstDrive) "챌린지를 마치면 주행 기록을 여기서 확인할 수 있어요."
+                                    else "다른 날짜를 선택하거나 월간 달력을 확인해 주세요.", color = Muted,
+                                    fontSize = 14.sp, lineHeight = 22.sp, modifier = Modifier.padding(top = 8.dp))
+                                if (firstDrive) {
+                                    Box(Modifier.padding(top = 16.dp).width(248.dp)) {
+                                        Primary("첫 챌린지 둘러보기") { vm.navigate(Screen.HOME) }
                                     }
-                                    Surface(color = PaleMint, shape = RoundedCornerShape(12.dp)) {
-                                        Box(Modifier.widthIn(min = 72.dp).padding(horizontal = 10.dp, vertical = 9.dp),
-                                            contentAlignment = Alignment.Center) {
-                                            Text(record.report.score?.let { "${it}점" } ?: "미확정",
-                                                fontSize = 20.sp, color = Ink, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Icon(Icons.Outlined.ChevronRight, null, tint = Muted)
                                 }
                             }
                         }
                     }
                 }
+                items(records, key = { it.session.id }) { record ->
+                    HistoryRecordRow(record) { vm.openHistoryRecord(record.session.id) }
+                }
             }
+        }
+    }
+}
+
+@Composable private fun HistoryRecordRow(record: CompletedDrive, onClick: () -> Unit) {
+    Surface(onClick = onClick, color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        HistoryRecordColumns(
+            destination = record.name,
+            date = historyDateValue(record.completedAtEpochMs) ?: "날짜 미상",
+            distance = "${"%.1f".format(record.report.validDistanceM / 1000)} km",
+            header = false,
+            score = record.report.score,
+            outcome = record.outcome,
+        )
+    }
+}
+
+@Composable private fun HistoryRecordColumns(
+    destination: String,
+    date: String,
+    distance: String,
+    header: Boolean,
+    score: Int? = null,
+    outcome: DriveOutcome = DriveOutcome.COMPLETED,
+) {
+    val color = if (header) Muted else Ink
+    val metadataColor = if (header) Muted else lerp(Ink, Muted, .8f)
+    val fontSize = if (header) 15.sp else 18.sp
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = if (header) 28.dp else 68.dp)
+            .padding(horizontal = 18.dp, vertical = if (header) 2.dp else 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(destination, Modifier.weight(1.25f), fontSize = if (header) fontSize else 20.sp,
+            fontWeight = if (header) FontWeight.Medium else FontWeight.SemiBold,
+            color = color, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(date, Modifier.weight(.82f), fontSize = fontSize, color = metadataColor)
+        Text(distance, Modifier.weight(.78f), fontSize = fontSize, color = metadataColor)
+        Box(Modifier.width(104.dp), contentAlignment = Alignment.CenterEnd) {
+            when {
+                header -> Text("점수", Modifier.padding(end = 14.dp), fontSize = fontSize, color = color)
+                outcome != DriveOutcome.COMPLETED -> Text(outcome.label, fontSize = 18.sp, color = Ink)
+                score == null -> Text("미확정", fontSize = 15.sp, color = Muted)
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(score.toString(), Modifier.alignByBaseline(), fontSize = 31.sp, lineHeight = 35.sp,
+                        fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text("점", Modifier.alignByBaseline(), fontSize = 16.sp, color = Muted)
+                }
+            }
+        }
+        Box(Modifier.width(24.dp)) {
+            if (!header) Icon(Icons.Outlined.ChevronRight, null, tint = Muted)
         }
     }
 }
@@ -936,7 +1015,12 @@ internal fun LiveRouteChallengeDialog(
                 Text(badge.title,fontSize=31.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=12.dp))
                 // The shield mascot is reserved exclusively for this newly earned badge event.
                 Mascot(3,Modifier.size(280.dp))
-                Text(badge.description,fontSize=15.sp,color=Muted,textAlign=TextAlign.Center,lineHeight=24.sp,modifier=Modifier.padding(bottom=20.dp))
+                Text(badge.description,fontSize=15.sp,color=Muted,textAlign=TextAlign.Center,lineHeight=24.sp)
+                if (badge.mileage > 0) {
+                    Text("+${badge.mileage}M 적립", fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                        color = Green, modifier = Modifier.padding(top = 6.dp))
+                }
+                Spacer(Modifier.height(20.dp))
                 Primary(if(remaining>1) "다음 배지 보기 (${remaining-1}개)" else "좋은 순간으로 간직하기",Icons.Outlined.Check,action=onNext)
             }
         }

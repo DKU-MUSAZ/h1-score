@@ -31,8 +31,10 @@ class BadgeCollectionUiTest {
         val prefs = ui.activity.getSharedPreferences("test-collection-${java.util.UUID.randomUUID()}", 0)
         val store = CollectionProgressStore(prefs)
         val progress = CollectionProgress().recordChallenge(day, 92).recordVisit(SpotTour.SEOUL, day)
-        store.saveChallenge(false, progress)
-        store.saveVisit(SpotTour.SEOUL, progress)
+        val editor = prefs.edit()
+        store.writeChallenge(editor, false, progress)
+        store.writeVisit(editor, false, SpotTour.SEOUL, progress)
+        editor.commit()
         assertEquals(0, store.read(true).challengeDays)
         assertEquals(0, store.read(true).visits(SpotTour.SEOUL))
         var started: SpotTour? = null
@@ -49,14 +51,23 @@ class BadgeCollectionUiTest {
         ui.onNode(dialog and hasText("안전운전") and expanded).assertIsDisplayed()
         ui.onNode(dialog and hasText("획득 조건")).assertIsDisplayed()
         ui.onNode(dialog and hasText("집계 시점")).assertIsDisplayed()
+        val badgeTitle = ui.onNode(dialog and hasText("차분한 출발")).fetchSemanticsNode().boundsInRoot
+        val badgeCondition = ui.onNode(dialog and hasText("80점 이상 5일")).fetchSemanticsNode().boundsInRoot
+        assertEquals(badgeTitle.left, badgeCondition.left, 1f)
+        assertTrue(badgeCondition.top >= badgeTitle.bottom)
         capture("collection-guide", ui.onNode(isDialog()))
         ui.onNode(dialog and hasText("닫기")).performClick()
         ui.onNode(hasText("랭킹") and filter).performClick()
         ui.onNodeWithText("배지 안내").performClick()
-        ui.onNode(dialog and hasText("랭킹") and expanded and hasText("집계 준비 중")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("랭킹") and expanded and hasText("실제 순위 연동 준비 중")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("브론즈 배지 2개를 모두 모으면 실버가 열려요.", substring = true)).assertIsDisplayed()
         ui.onNode(dialog and hasText("닫기")).performClick()
         ui.onNode(hasText("스팟투어") and filter).performClick()
         ui.onNode(hasText("서울 오토 라이브러리") and hasText("1 / 3회")).assertIsDisplayed().performClick()
+        val confirm = ui.onNode(dialog and hasText("확인")).fetchSemanticsNode().boundsInRoot
+        val popup = ui.onNode(isDialog()).fetchSemanticsNode().boundsInRoot
+        assertEquals(popup.center.x, confirm.center.x, 1f)
+        capture("collection-detail", ui.onNode(isDialog()))
         ui.onNode(dialog and hasText("방문 기록 시작")).performClick()
         ui.runOnIdle { assertEquals(SpotTour.SEOUL, started) }
     }
@@ -67,9 +78,9 @@ class BadgeCollectionUiTest {
         val owned = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "획득")
         ui.onNode(hasText(title) and owned).assertIsDisplayed().performClick()
         ui.onNodeWithText("앱을 처음 실행한 모든 무사즈에게 주는 환영 배지예요.").assertIsDisplayed()
-        ui.onNode(hasAnyAncestor(isDialog()) and hasText("달성 보너스", substring = true)).assertDoesNotExist()
+        ui.onNode(hasAnyAncestor(isDialog()) and hasText("획득 보상", substring = true)).assertDoesNotExist()
         ui.onNodeWithText("확인").performClick()
-        ui.onNodeWithText("배지 컬렉션").assertIsDisplayed()
+        ui.onNode(hasText("전체") and isSelectable()).assertIsSelected()
 
         ui.onNode(hasText("챌린지") and isSelectable()).performClick()
         ui.onNodeWithText(title).assertDoesNotExist()
@@ -132,7 +143,6 @@ class BadgeCollectionUiTest {
         ui.onNodeWithText("전체").assertIsSelected()
         ui.onNodeWithText("18종 · 미리보기", substring = true).assertDoesNotExist()
         ui.onNodeWithText("0 / 18").assertDoesNotExist()
-        ui.onNodeWithText("+200P").assertDoesNotExist()
         val locked = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "잠금")
         val earned = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "획득")
         ui.onNodeWithText("첫 발걸음").assertIsDisplayed()
@@ -156,11 +166,11 @@ class BadgeCollectionUiTest {
         capture("tour-rank")
         ui.onNode(hasText("스팟투어") and filter).performClick().assertIsSelected()
         ui.onNodeWithText("스팟투어 배지").assertIsDisplayed()
-        ui.onNodeWithText("3종").assertIsDisplayed()
+        ui.onNodeWithText("3종 중 ", substring = true).assertIsDisplayed()
         capture("tour-spot")
         ui.onNodeWithText("서울 오토 라이브러리").performClick()
         ui.onNode(hasAnyAncestor(isDialog()) and hasText("현대 모터스튜디오 서울 · 3회 방문")).assertExists()
-        ui.onNodeWithText("장소별로 하루 한 번 인정돼요.", substring = true).assertExists()
+        ui.onNodeWithText("시연 방문 추가").assertExists()
         ui.onNodeWithText("확인").performClick()
         ui.onNode(hasText("챌린지") and filter).performClick().assertIsSelected()
         ui.onNodeWithText("챌린지 배지").assertIsDisplayed()
@@ -171,7 +181,7 @@ class BadgeCollectionUiTest {
         ui.onNode(hasText("첫 발걸음") and hasText("5 / 5일 · 획득") and earned).assertIsDisplayed()
         ui.onNode(hasText("출근길 동반자") and hasText("12 / 15일") and locked).assertIsDisplayed()
         ui.onNodeWithText("첫 발걸음").performClick()
-        ui.onNodeWithText("달성 보너스 +200P · 예시").assertExists()
+        ui.onNodeWithText("획득 보상 +15M").assertExists()
         ui.onNodeWithText("확인").performClick()
         for(category in listOf("안전운전", "랭킹", "주행 습관")) {
             ui.onNode(hasText(category) and filter).performClick().assertIsSelected()
@@ -211,8 +221,8 @@ class BadgeCollectionUiTest {
         ui.onNodeWithText("엔진오일 교환권 안내").assertDoesNotExist()
         ui.onNode(hasText("마일리지") and navigationTab).performClick().assertIsSelected()
         ui.onNodeWithText("엔진오일 교환권 안내").performClick()
-        ui.onNodeWithText("목표 50,000P").assertIsDisplayed()
-        ui.onNodeWithText("대회 1,500P + 배지 1,450P = 2,950P", substring = true).assertExists()
+        ui.onNodeWithText("목표 600M").assertIsDisplayed()
+        ui.onNodeWithText("챌린지 순위 보상과 배지 보상으로 마일리지를 모을 수 있어요.").assertExists()
         ui.onNodeWithText("확인").performClick()
         ui.runOnIdle {
             val vm=(ui.activity.application as H1Application).model

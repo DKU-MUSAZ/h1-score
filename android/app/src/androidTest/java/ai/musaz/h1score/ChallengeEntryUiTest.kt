@@ -39,16 +39,22 @@ class ChallengeEntryUiTest {
         ui.onNodeWithText("챌린지 시작").assertIsEnabled().assertIsDisplayed()
         ui.onNodeWithText("길 안내만 열기").assertIsEnabled().assertIsDisplayed()
         capture("challenge-entry-belt-buckled")
+        setBelt(vm, null)
+        ui.onNodeWithText("챌린지 시작").assertIsNotEnabled()
+        setBelt(vm, true, stale = true)
+        ui.onNodeWithText("챌린지 시작").assertIsNotEnabled()
+        setBelt(vm, true)
+        ui.onNodeWithText("챌린지 시작").assertIsEnabled()
         consent.performClick()
         ui.onNodeWithText("챌린지 시작").assertIsNotEnabled()
     }
 
-    private fun setBelt(vm: ChallengeViewModel, buckled: Boolean) {
+    private fun setBelt(vm: ChallengeViewModel, buckled: Boolean?, stale: Boolean = false) {
         ui.runOnIdle {
             val now = SystemClock.elapsedRealtime()
             vm.receiveVehicle(LiveVehicle(
                 speedMps = 0.0, speedAt = now, gearPark = true, uxRestricted = false,
-                belt = buckled, beltAt = now,
+                belt = buckled, beltAt = if (stale) now - 2501 else now,
             ))
         }
     }
