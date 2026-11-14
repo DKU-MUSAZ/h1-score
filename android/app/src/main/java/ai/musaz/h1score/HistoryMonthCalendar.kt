@@ -115,8 +115,8 @@ import ai.musaz.h1score.core.ChallengeRound
         tween(460, easing = FastOutSlowInEasing), label = "history-month-expansion")
     val days = remember(month) { historyMonthDays(month) }
     val grouped = remember(records) {
-        records.filter { historyDate(it.completedAtEpochMs) != null }
-            .groupBy { historyDate(it.completedAtEpochMs)!! }
+        records.filter { historyRecordDay(it) != null }
+            .groupBy { historyRecordDay(it)!! }
             .mapValues { (_, items) -> historyByDate(items, HistoryDateOrder.OLDEST_FIRST) }
     }
     val today = LocalDate.now(ChallengeRound.seoul)

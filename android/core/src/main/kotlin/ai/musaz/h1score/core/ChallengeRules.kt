@@ -352,7 +352,7 @@ class MileageLedger(initialBalance: Int = 0, initialIds: Set<String> = emptySet(
         if (!settled.add(id)) return 0
         if(miles == 0) return 0
         val key="$date|$destination"
-        if(key in daily || daily.count { it.startsWith("$date|") } >=2) return 0
+        if(daily.any { it.startsWith("$date|") }) return 0
         daily.add(key)
         balance += miles
         return miles

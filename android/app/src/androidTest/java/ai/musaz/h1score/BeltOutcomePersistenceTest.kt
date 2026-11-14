@@ -64,6 +64,18 @@ class BeltOutcomePersistenceTest {
         rows.getJSONObject(0).change()
         prefs.edit().putString("completed-drives-v1", rows.toString()).remove("last-completed-drive-v1").commit()
     }
+    @Test fun maneuverReasonsAndObservationOnlyCandidatesSurviveReload() {
+        val saved=drive(DriveOutcome.COMPLETED,null).let{it.copy(scoringVersion=ScoreEngine.VERSION,report=it.report.copy(
+            scoringVersion=ScoreEngine.VERSION,
+            turns=listOf(TurnEvent(1,2,TurnDirection.LEFT,TurnVerdict.LATE),
+                TurnEvent(3,4,TurnDirection.RIGHT,TurnVerdict.UNVERIFIABLE,ManeuverKind.LANE_CHANGE,
+                    TurnReason.LANE_OBSERVATION_ONLY,TurnVerdict.UNUSED)),
+            turnDiagnostics=mapOf(TurnReason.GPS_UNAVAILABLE to 5)))}
+        CompletedDriveStore(prefs).save(saved)
+        val restored=CompletedDriveStore(prefs).readAll().single()
+        assertEquals(saved,restored)
+        assertEquals(1.0,restored.report.turnPenalty,0.0)
+    }
 
     private fun drive(outcome: DriveOutcome, reason: BeltFailureReason?) = CompletedDrive(
         ChallengeSession("belt", "destination", 14_000.0,

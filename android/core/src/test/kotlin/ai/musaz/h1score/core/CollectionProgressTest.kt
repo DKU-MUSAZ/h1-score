@@ -9,18 +9,18 @@ import org.junit.Test
 class CollectionProgressTest {
     private val monday = LocalDate.of(2026, 11, 30)
 
-    @Test fun weeklyAverageUsesDailyBestScoresOnlyWithinThisWeek() {
+    @Test fun weeklyAverageUsesFirstAcceptedScoreOfEachDay() {
         val progress = CollectionProgress()
             .recordChallenge(monday.minusDays(1), 100)
             .recordChallenge(monday, 70)
             .recordChallenge(monday, 90)
             .recordChallenge(monday.plusDays(1), 84)
             .recordChallenge(monday.plusDays(2), 100)
-        assertEquals(87, progress.weeklyScoreAverage(monday.plusDays(1)))
+        assertEquals(77, progress.weeklyScoreAverage(monday.plusDays(1)))
         assertEquals(null, progress.weeklyScoreAverage(monday.plusWeeks(1)))
     }
 
-    @Test fun oneDayCountsOnceAndKeepsItsHighestScore() {
+    @Test fun oneDayCountsOnceAndKeepsItsFirstScore() {
         val progress = CollectionProgress()
             .recordChallenge(monday, 80)
             .recordChallenge(monday, 95)
@@ -28,7 +28,7 @@ class CollectionProgressTest {
             .recordChallenge(monday.plusDays(1), 82)
         assertEquals(2, progress.challengeDays)
         assertEquals(2, progress.scoreDays(80))
-        assertEquals(1, progress.scoreDays(95))
+        assertEquals(0, progress.scoreDays(95))
     }
 
     @Test fun weeksStartOnMondayAndCompletedRoutinesKeepTheirProgress() {

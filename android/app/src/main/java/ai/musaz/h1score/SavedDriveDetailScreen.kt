@@ -52,6 +52,12 @@ internal fun SavedDriveDetailScreen(drive: CompletedDrive, onBack: () -> Unit) {
                     "${historyDateLabel(drive.completedAtEpochMs)}  ·  ${"%.1f".format(report.validDistanceM / 1000)} km  ·  $source",
                     fontSize = 16.sp, color = H1Style.Muted,
                 )
+                if (drive.recognition != ResultRecognition.LEGACY) {
+                    Text(if (drive.recognition == ResultRecognition.ACCEPTED)
+                        "${drive.participationDay} 참가 · 경기 인정"
+                    else "${drive.recognition.label} · 배지·경기 보상 제외",
+                        fontSize = 15.sp, color = H1Style.Muted)
+                }
             }
         }
 

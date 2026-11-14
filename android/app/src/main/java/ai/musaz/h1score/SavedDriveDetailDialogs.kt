@@ -212,11 +212,17 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
             Text("순위 보상 +${drive.earned}M · 배지 보상 +${drive.badgeMileage}M",
                 fontSize = 14.sp, color = H1Style.Ink)
             if (own != null && own.miles != drive.earned) {
-                Text("순위로 배정된 ${own.miles} M와 실제 적립된 ${drive.earned} M는 달라요. 적립에는 목적지별 하루 1회·하루 2회 한도가 적용돼요.",
+                Text("순위로 배정된 ${own.miles} M와 실제 적립된 ${drive.earned} M는 달라요. 하루 한 경기만 인정하며 같은 경기 보상은 한 번만 지급해요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
             }
         }
     }
+    drive.awardedBadges.forEach { badge ->
+        Text("${badge.title} · 획득 보상 +${badge.mileage}M", fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold, color = H1Style.Ink)
+    }
+    if (!drive.demo && drive.ranking.isEmpty()) Text("실제 순위 정산은 아직 연결되지 않았어요. 경기 보상과 배지 보상은 구분해 기록해요.",
+        fontSize = 16.sp, lineHeight = 24.sp, color = H1Style.Muted)
     Text("시제품 평가 기준 · 순위 보상은 85점 이상 유효 기록에 적용 · 완료 보상 0M",
         fontSize = 12.sp, lineHeight = 18.sp, color = H1Style.Muted)
 }

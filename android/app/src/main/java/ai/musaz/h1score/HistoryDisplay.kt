@@ -59,14 +59,19 @@ internal fun historyDateValue(completedAtEpochMs: Long?): String? =
 internal fun historyDate(completedAtEpochMs: Long?): LocalDate? =
     completedAtEpochMs?.let { Instant.ofEpochMilli(it).atZone(ChallengeRound.seoul).toLocalDate() }
 
+/** Calendar grouping and daily progress share the reservation date; the row retains actual arrival time. */
+internal fun historyRecordDay(drive: CompletedDrive): LocalDate? =
+    drive.participationDay?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        ?: historyDate(drive.completedAtEpochMs)
+
 internal fun historyForDay(records: List<CompletedDrive>, date: LocalDate?): List<CompletedDrive> =
-    if (date == null) records else records.filter { historyDate(it.completedAtEpochMs) == date }
+    if (date == null) records else records.filter { historyRecordDay(it) == date }
 
 internal fun historyForWeek(records: List<CompletedDrive>, week: LocalDate): List<CompletedDrive> {
     val start = historyWeekStart(week)
     val end = start.plusDays(7)
     return records.filter { record ->
-        historyDate(record.completedAtEpochMs)?.let { !it.isBefore(start) && it.isBefore(end) } == true
+        historyRecordDay(record)?.let { !it.isBefore(start) && it.isBefore(end) } == true
     }
 }
 
@@ -74,7 +79,7 @@ internal fun historyWeekStart(day: LocalDate): LocalDate =
     day.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
 internal fun initialHistoryWeek(records: List<CompletedDrive>, today: LocalDate = LocalDate.now(ChallengeRound.seoul)): LocalDate =
-    historyWeekStart(records.mapNotNull { historyDate(it.completedAtEpochMs) }.maxOrNull() ?: today)
+    historyWeekStart(records.mapNotNull(::historyRecordDay).maxOrNull() ?: today)
 
 internal fun historyByDate(records: List<CompletedDrive>, order: HistoryDateOrder): List<CompletedDrive> =
     records.sortedWith { first, second ->

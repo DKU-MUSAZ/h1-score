@@ -10,6 +10,12 @@ import java.time.Instant
 import java.time.LocalDate
 
 class HistoryDisplayTest {
+    @Test fun afterMidnightArrivalIsShownOnItsParticipationDayInBothCalendars() {
+        val saved=drive("overnight",time("2026-11-15T15:10:00Z")).copy(participationDay="2026-11-15")
+        assertEquals(listOf(saved),historyForDay(listOf(saved),LocalDate.of(2026,11,15)))
+        assertEquals(emptyList<CompletedDrive>(),historyForDay(listOf(saved),LocalDate.of(2026,11,16)))
+        assertEquals(listOf(saved),historyForWeek(listOf(saved),LocalDate.of(2026,11,9)))
+    }
     @Test fun weekIncludesOnlyMondayThroughSundayInKoreanTime() {
         val before = drive("before", time("2026-12-27T14:59:59Z"))
         val first = drive("monday", time("2026-12-27T15:00:00Z"))

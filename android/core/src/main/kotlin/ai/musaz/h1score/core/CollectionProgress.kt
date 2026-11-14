@@ -43,7 +43,7 @@ data class CollectionProgress(
     fun visits(spot: SpotTour) = visitsBySpot[spot].orEmpty().size
 
     fun recordChallenge(day: LocalDate, score: Int): CollectionProgress {
-        if (score !in 0..100 || score <= (scoresByDay[day] ?: -1)) return this
+        if (score !in 0..100 || day in scoresByDay) return this
         return copy(scoresByDay = scoresByDay + (day to score))
     }
 

@@ -23,6 +23,9 @@ internal data class CompletedDrive(
     val badgeMileage: Int = 0,
     val outcome: DriveOutcome = DriveOutcome.COMPLETED,
     val beltFailureReason: BeltFailureReason? = null,
+    val participationDay: String? = null,
+    val recognition: ResultRecognition = ResultRecognition.LEGACY,
+    val awardedBadges: List<BadgeAward> = emptyList(),
 )
 
 internal class CompletedDriveStore(private val prefs: SharedPreferences) {
@@ -86,6 +89,11 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             put("venueId", s.venueId); put("competitionId", s.competitionId)
             put("name", value.name); put("demo", value.demo); put("earned", value.earned); put("missedDeadline", value.missedDeadline)
             put("badgeMileage", value.badgeMileage)
+            put("participationDay", value.participationDay)
+            put("recognition", value.recognition.name)
+            put("awardedBadges", JSONArray().apply { value.awardedBadges.forEach { award -> put(JSONObject().apply {
+                put("id", award.id); put("title", award.title); put("description", award.description); put("mileage", award.mileage)
+            }) } })
             put("outcome", value.outcome.name); put("beltFailureReason", value.beltFailureReason?.name)
             put("completedAtEpochMs", value.completedAtEpochMs); put("scoringVersion", value.scoringVersion)
             put("score", r.score); put("compliance", r.compliance); put("smoothness", r.smoothness)
@@ -196,6 +204,11 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             badgeMileage = j.optInt("badgeMileage"),
             outcome = outcome,
             beltFailureReason = BeltFailureReason.entries.firstOrNull { it.name == j.optString("beltFailureReason") },
+            participationDay = j.optString("participationDay").takeIf { it.isNotBlank() && it != "null" },
+            recognition = ResultRecognition.entries.firstOrNull { it.name == j.optString("recognition") } ?: ResultRecognition.LEGACY,
+            awardedBadges = j.optJSONArray("awardedBadges").objects().map {
+                BadgeAward(it.getString("id"), it.getString("title"), it.getString("description"), it.getInt("mileage"))
+            },
         )
     }.getOrNull()
 
