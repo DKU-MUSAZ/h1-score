@@ -201,11 +201,12 @@ import ai.musaz.h1score.core.ChallengeRound
                                             color = if (chosen) Color.White else H1Style.Ink)
                                     }
                                     // Equal score space keeps numerals aligned even on empty dates.
-                                    Box(Modifier.height(if (compact) 30.dp else 42.dp).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                                    Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                                    Box(Modifier.height(if (compact) 34.dp else 44.dp).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                                         if (scores.isNotEmpty()) Text(historyDayResults(scores),
                                             Modifier.graphicsLayer { alpha = progress },
-                                            fontSize = if (compact) 13.sp else 17.sp,
-                                            lineHeight = if (compact) 15.sp else 20.sp,
+                                            fontSize = if (compact) 15.sp else 19.sp,
+                                            lineHeight = if (compact) 17.sp else 22.sp,
                                             fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
                                             color = Color(0xFF526D88))
                                     }
