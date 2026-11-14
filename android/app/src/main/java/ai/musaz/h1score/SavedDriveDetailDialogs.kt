@@ -121,12 +121,13 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
             if (report.usesDistanceBonus) {
                 val unused = report.turns.count { it.verdict == TurnVerdict.UNUSED }
                 val opposite = report.turns.count { it.verdict == TurnVerdict.MISMATCHED }
+                val late = report.turns.count { it.verdict == TurnVerdict.LATE }
                 SavedDetailPoints("가점", listOf(
                     "속도 +${scorePoints(report.speedPoints)}점 · 제한속도 이하로 달린 거리",
                     "가감속 +${scorePoints(report.accelerationPoints)}점 · 제한속도를 지키고 급가감속 없이 달린 거리",
                 ), SavedDriveDetailStyle.Good)
                 SavedDetailPoints("감점", listOf(
-                    "회전 −${scorePoints(report.turnPenalty)}점 · 방향지시등 미사용 ${unused}건, 반대 방향 ${opposite}건",
+                    "회전 −${scorePoints(report.turnPenalty)}점 · 미사용 ${unused}건, 늦은 사용 ${late}건, 반대 방향 ${opposite}건",
                 ), SavedDriveDetailStyle.Improve)
                 Text("가점은 소수 둘째 자리까지 표시해요. 최종 점수는 기본 점수에 가점을 더하고 감점을 뺀 뒤 반올림해요. 100점은 모든 배점을 채웠을 때만 받을 수 있어요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
@@ -136,11 +137,11 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
                 Text("처음 10km까지 준수 거리 1km당 +2.5점, 그중 부드러운 가감속 거리 1km당 +1.5점이에요. 짧은 주행도 실제 거리만큼 가점을 쌓아요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-                Text("회전 방향지시등 미사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점",
+                Text(if(report.scoringVersion==ai.musaz.h1score.core.ScoreEngine.VERSION)
+                    "회전 전 미사용·늦은 사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점"
+                    else "회전 방향지시등 미사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-                val judgedTurns = report.turns.count { it.verdict != TurnVerdict.UNVERIFIABLE }
-                Text("판정한 회전 ${judgedTurns}건 · 판단 보류 ${report.turns.size - judgedTurns}건",
-                    fontSize = 14.sp, color = H1Style.Muted)
+                turnAssessmentLines(report).forEach { Text(it,fontSize=14.sp,lineHeight=22.sp,color=H1Style.Muted) }
                 if (report.kilometers.isNotEmpty()) {
                     Text("거리별 가점", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
                     report.kilometers.forEach { km ->

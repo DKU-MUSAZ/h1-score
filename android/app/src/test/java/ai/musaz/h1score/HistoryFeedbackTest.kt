@@ -11,6 +11,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HistoryFeedbackTest {
+    @Test fun feedbackInsertsActualPointsAndCountsWithoutRecalculatingScore() {
+        val saved = report(overDistance=1234.0, accelerations=2).copy(scoringVersion=ScoreEngine.VERSION,
+            longitudinalReady=true, speedPoints=21.91, accelerationPoints=12.34,
+            turns=listOf(TurnEvent(1,2,TurnDirection.LEFT,TurnVerdict.UNUSED)))
+        val feedback=historyFeedback(saved)
+        assertTrue(feedback.goodPoints.any { it.contains("21.91점") })
+        assertTrue(feedback.improvements.any { it.contains("급가속 2회") && it.contains("12.34점") })
+        assertTrue(feedback.improvements.any { it.contains("1.00점") })
+        assertEquals(92, saved.score)
+    }
+
+    @Test fun laneObservationsNeverGenerateTurnPenaltyOrAdvice() {
+        val saved=report().copy(scoringVersion=ScoreEngine.VERSION, longitudinalReady=true,
+            turns=listOf(TurnEvent(1,2,TurnDirection.LEFT,TurnVerdict.UNUSED,
+                ai.musaz.h1score.core.ManeuverKind.LANE_CHANGE)))
+        val feedback=historyFeedback(saved)
+        assertFalse(feedback.improvements.any { it.contains("사용하지 않은 회전") })
+        assertEquals("판정 없음", feedback.metric("방향지시등").value)
+    }
+
+    @Test fun noTurnEvidenceDoesNotClaimCleanTurns() {
+        val feedback=historyFeedback(report().copy(scoringVersion=ScoreEngine.VERSION, longitudinalReady=true))
+        assertTrue(feedback.improvements.any { it.contains("회전 판정 자료가 없어") })
+    }
+
     @Test fun cappedEventsDoNotReplaceAggregateDistanceOrAccelerationCount() {
         val events = List(97) { event(DrivingEventType.OVERSPEED) } +
             List(3) { event(DrivingEventType.RAPID_DECELERATION) }
