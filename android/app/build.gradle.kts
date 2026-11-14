@@ -21,6 +21,7 @@ android {
     namespace = "ai.musaz.h1score"
     compileSdk = 35
     defaultConfig {
+        buildConfigField("boolean", "FILMING_BUILD", "false")
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoMapKey\"")
         buildConfigField("String", "KAKAO_LOCAL_REST_API_KEY", "\"\"")
         applicationId = "ai.musaz.h1score"
@@ -32,6 +33,7 @@ android {
     }
     buildTypes {
         debug {
+            buildConfigField("boolean", "FILMING_BUILD", (providers.gradleProperty("filming").orNull == "true").toString())
             buildConfigField("String", "KAKAO_LOCAL_REST_API_KEY", "\"$kakaoLocalKey\"")
         }
     }

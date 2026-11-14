@@ -13,6 +13,8 @@ class H1Application : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG && BuildConfig.FILMING_BUILD)
+            seedFilmingHistory(getSharedPreferences(appPreferenceName, 0))
         if (BuildConfig.KAKAO_NATIVE_APP_KEY.isNotBlank()) {
             kakaoMapEnabled = runCatching {
                 com.kakao.vectormap.KakaoMapSdk.init(this, BuildConfig.KAKAO_NATIVE_APP_KEY)

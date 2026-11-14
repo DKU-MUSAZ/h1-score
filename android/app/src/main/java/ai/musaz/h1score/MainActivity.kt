@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         }
             .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if(permissions.isNotEmpty()) requestPermissions(permissions.toTypedArray(),7)
-        setContent { FirstRunHost(model, getSharedPreferences("h1-demo-v1",0), onExit=::finish, onComplete=::consumeResultRequest) }
+        setContent { FirstRunHost(model, getSharedPreferences(appPreferenceName,0), onExit=::finish, onComplete=::consumeResultRequest) }
         handleNotification(intent)
     }
     override fun onNewIntent(intent: Intent) {
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
     private fun handleNotification(intent: Intent?) {
         if (intent?.action == RecordingService.OPEN_RESULT) {
             pendingResult=true
-            if(getSharedPreferences("h1-demo-v1",0).getBoolean("first-run-complete-v1",false)) consumeResultRequest()
+            if(getSharedPreferences(appPreferenceName,0).getBoolean("first-run-complete-v1",false)) consumeResultRequest()
         }
     }
     private fun consumeResultRequest() {

@@ -158,6 +158,7 @@ internal class ScoringSampleBuffer(private val onOverflow: () -> Unit = {}) {
 /** Read-only adapter. No synthetic fallback values are emitted on connection failure. */
 class PleosConnection(private val context: Context) {
     private val beltObservations = ArrayDeque<BeltObservation>()
+    internal var rehearsalEnabled = false
     private var beltOverflow = false
     private val seatRequests = mutableMapOf<String, Long>()
     private val seatReader = PleosSeatReader(context, ::onSeatSourceUnavailable)
@@ -174,7 +175,8 @@ class PleosConnection(private val context: Context) {
             main.post { updateState(change) }
             return
         }
-        val next=change(state.value)
+        val next=rehearsalBelt(change(state.value), rehearsalEnabled && BuildConfig.DEBUG &&
+            Build.HARDWARE == "ranchu" && Build.DEVICE.startsWith("crp_avd"), SystemClock.elapsedRealtime())
         if (beltObservations.size == 512) { beltObservations.removeFirst(); beltOverflow=true }
         beltObservations.addLast(next.beltObservation(SystemClock.elapsedRealtime()))
         state.value=next

@@ -147,8 +147,13 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
             chooseSpot(spot)
         } else {
             hideKeyboard()
+            // Keep recommendations inline, but retain native search when no place resolves.
+            val noMatches = keyword == name.trim() && suggestions?.isEmpty() == true
+            query = name.trim()
+            searching = true
+            showMap = false
             shortcutLookup = false
-            navigationQuery = name.trim()
+            navigationQuery = if (noMatches) name.trim() else null
         }
     }
 
