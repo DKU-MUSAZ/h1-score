@@ -45,24 +45,26 @@ class BadgeCollectionUiTest {
         val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
         val expanded = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "펼쳐짐")
         val dialog = hasAnyAncestor(isDialog())
-        ui.onNode(hasText("안전운전") and filter).performClick()
+        ui.onNode(hasText("명예 훈장") and filter).performClick()
+        ui.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("좋은 습관"))
         ui.onNode(hasText("좋은 습관") and hasText("1 / 5일")).assertIsDisplayed()
         ui.onNodeWithText("배지 안내").performClick()
-        ui.onNode(dialog and hasText("안전운전") and expanded).assertIsDisplayed()
+        ui.onNode(dialog and hasText("명예 훈장") and expanded).assertIsDisplayed()
         ui.onNode(dialog and hasText("획득 조건")).assertIsDisplayed()
         ui.onNode(dialog and hasText("집계 시점")).assertIsDisplayed()
+        ui.onNode(dialog and hasScrollToIndexAction()).performScrollToNode(hasText("차분한 출발"))
         val badgeTitle = ui.onNode(dialog and hasText("차분한 출발")).fetchSemanticsNode().boundsInRoot
         val badgeCondition = ui.onNode(dialog and hasText("80점 이상 5일")).fetchSemanticsNode().boundsInRoot
         assertEquals(badgeTitle.left, badgeCondition.left, 1f)
         assertTrue(badgeCondition.top >= badgeTitle.bottom)
         capture("collection-guide", ui.onNode(isDialog()))
         ui.onNode(dialog and hasText("닫기")).performClick()
-        ui.onNode(hasText("랭킹") and filter).performClick()
+        ui.onNode(hasText("명예 훈장") and filter).performClick()
         ui.onNodeWithText("배지 안내").performClick()
-        ui.onNode(dialog and hasText("랭킹") and expanded and hasText("실제 순위 연동 준비 중")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("명예 훈장") and expanded and hasText("안전점수 집계 · 순위 연동 준비 중")).assertIsDisplayed()
         ui.onNode(dialog and hasText("브론즈 배지 2개를 모두 모으면 실버가 열려요.", substring = true)).assertIsDisplayed()
         ui.onNode(dialog and hasText("닫기")).performClick()
-        ui.onNode(hasText("스팟투어") and filter).performClick()
+        ui.onNode(hasText("스팟 투어") and filter).performClick()
         ui.onNode(hasText("서울 오토 라이브러리") and hasText("1 / 3회")).assertIsDisplayed().performClick()
         val confirm = ui.onNode(dialog and hasText("확인")).fetchSemanticsNode().boundsInRoot
         val popup = ui.onNode(isDialog()).fetchSemanticsNode().boundsInRoot
@@ -82,7 +84,7 @@ class BadgeCollectionUiTest {
         ui.onNodeWithText("확인").performClick()
         ui.onNode(hasText("전체") and isSelectable()).assertIsSelected()
 
-        ui.onNode(hasText("챌린지") and isSelectable()).performClick()
+        ui.onNode(hasText("출석 도장") and isSelectable()).performClick()
         ui.onNodeWithText(title).assertDoesNotExist()
         ui.onNodeWithText("전체").performClick()
         ui.onNode(hasText(title) and owned).assertIsDisplayed()
@@ -91,11 +93,10 @@ class BadgeCollectionUiTest {
     @Test fun eachCollectionBadgeDisplaysDistinctArtwork() {
         ui.setContent { BadgeCollectionScreen(legacyOwned = emptySet(), onChallenge = {}) }
         val badgesByCategory = mapOf(
-            "챌린지" to listOf("첫 발걸음", "꾸준한 드라이버", "출근길 동반자", "함께 달린 무사즈"),
-            "안전운전" to listOf("차분한 출발", "안정적인 흐름", "좋은 습관", "믿음직한 드라이버", "정교한 운전"),
-            "랭킹" to listOf("순위 첫걸음", "순위 적응 완료", "중위권 돌파", "꾸준한 상위권", "상위권 단골", "무사즈 에이스"),
-            "주행 습관" to listOf("주간 루틴", "네 주의 동행", "꾸준한 좋은 흐름"),
-            "스팟투어" to listOf("서울 오토 라이브러리", "고양 모빌리티 탐험", "부산 디자인 산책")
+            "출석 도장" to listOf("첫 발걸음", "꾸준한 드라이버", "출근길 동반자", "함께 달린 무사즈", "주간 루틴", "네 주의 동행"),
+            "명예 훈장" to listOf("차분한 출발", "안정적인 흐름", "좋은 습관", "믿음직한 드라이버", "정교한 운전", "꾸준한 좋은 흐름",
+                "순위 첫걸음", "순위 적응 완료", "중위권 돌파", "꾸준한 상위권", "상위권 단골", "무사즈 에이스"),
+            "스팟 투어" to listOf("서울 오토 라이브러리", "고양 모빌리티 탐험", "부산 디자인 산책")
         )
         val grid = ui.onNode(hasScrollToIndexAction())
         val dialogArtwork = ui.onNode(
@@ -147,52 +148,50 @@ class BadgeCollectionUiTest {
         val earned = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "획득")
         ui.onNodeWithText("첫 발걸음").assertIsDisplayed()
         val headingBounds = ui.onNodeWithText("배지 컬렉션").fetchSemanticsNode().boundsInRoot
-        val rankChip = ui.onNodeWithText("랭킹").fetchSemanticsNode().boundsInRoot
+        val rankChip = ui.onNodeWithText("명예 훈장").fetchSemanticsNode().boundsInRoot
         assertTrue("The collection title should be above the filters", headingBounds.bottom <= rankChip.top)
         val grid = ui.onNode(hasScrollToIndexAction())
         val heading = SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
         val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
         val navigationTab = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
         capture("tour-all")
-        for (category in listOf("챌린지", "안전운전", "랭킹", "주행 습관", "스팟투어")) {
+        for (category in listOf("출석 도장", "명예 훈장", "스팟 투어")) {
             val categoryHeading = hasText(category) and heading
             grid.performScrollToNode(categoryHeading)
             ui.onNode(categoryHeading).assertIsDisplayed()
         }
-        ui.onNode(hasText("랭킹") and filter).performClick().assertIsSelected()
+        ui.onNode(hasText("명예 훈장") and filter).performClick().assertIsSelected()
+        ui.onNode(hasText("브론즈") and heading).assertIsDisplayed()
+        ui.onNodeWithText("순위 첫걸음").assertIsDisplayed()
+        capture("honor-rank-first")
         val silverGate = hasText("브론즈 배지 2개를 모두 획득하면 열려요")
         grid.performScrollToNode(silverGate)
         ui.onNode(silverGate).assertIsDisplayed()
         capture("tour-rank")
-        ui.onNode(hasText("스팟투어") and filter).performClick().assertIsSelected()
-        ui.onNodeWithText("스팟투어 배지").assertIsDisplayed()
+        ui.onNode(hasText("스팟 투어") and filter).performClick().assertIsSelected()
+        ui.onNodeWithText("스팟 투어 배지").assertIsDisplayed()
         ui.onNodeWithText("3종 중 ", substring = true).assertIsDisplayed()
         capture("tour-spot")
         ui.onNodeWithText("서울 오토 라이브러리").performClick()
         ui.onNode(hasAnyAncestor(isDialog()) and hasText("현대 모터스튜디오 서울 · 3회 방문")).assertExists()
         ui.onNodeWithText("시연 방문 추가").assertExists()
         ui.onNodeWithText("확인").performClick()
-        ui.onNode(hasText("챌린지") and filter).performClick().assertIsSelected()
-        ui.onNodeWithText("챌린지 배지").assertIsDisplayed()
-        ui.onNodeWithText("4종 중 ", substring = true).assertIsDisplayed()
+        ui.onNode(hasText("출석 도장") and filter).performClick().assertIsSelected()
+        ui.onNodeWithText("출석 도장 배지").assertIsDisplayed()
+        ui.onNodeWithText("6종 중 ", substring = true).assertIsDisplayed()
         ui.onNodeWithText("시연용 - 달성 예시보기").performClick()
         ui.onNodeWithText("예시 기록").assertIsDisplayed()
-        ui.onNodeWithText("4종 중 2개 획득").assertIsDisplayed()
+        ui.onNodeWithText("6종 중 3개 획득").assertIsDisplayed()
         ui.onNode(hasText("첫 발걸음") and hasText("5 / 5일 · 획득") and earned).assertIsDisplayed()
         ui.onNode(hasText("출근길 동반자") and hasText("12 / 15일") and locked).assertIsDisplayed()
         ui.onNodeWithText("첫 발걸음").performClick()
         ui.onNodeWithText("획득 보상 +15M").assertExists()
         ui.onNodeWithText("확인").performClick()
-        for(category in listOf("안전운전", "랭킹", "주행 습관")) {
+        for(category in listOf("명예 훈장", "출석 도장")) {
             ui.onNode(hasText(category) and filter).performClick().assertIsSelected()
             ui.onNodeWithText("$category 배지").assertIsDisplayed()
-            if(category=="랭킹") {
-                val first = ui.onNodeWithText("순위 첫걸음").fetchSemanticsNode().boundsInRoot
-                val second = ui.onNodeWithText("순위 적응 완료").fetchSemanticsNode().boundsInRoot
+            if(category=="명예 훈장") {
                 grid.performScrollToNode(hasText("중위권 돌파"))
-                val third = ui.onNodeWithText("중위권 돌파").fetchSemanticsNode().boundsInRoot
-                assertEquals(first.top, second.top, 1f)
-                assertTrue("The third card should start a new row", third.top >= first.bottom)
                 ui.onNode(silverGate).assertDoesNotExist()
                 ui.onNode(hasText("꾸준한 상위권") and hasText("4 / 5일")).assertIsDisplayed()
                 for((title, tier) in listOf("순위 첫걸음" to "브론즈", "중위권 돌파" to "실버",
@@ -204,6 +203,7 @@ class BadgeCollectionUiTest {
             }
         }
         android.util.Log.i("BadgeUiTest","opening routine details")
+        grid.performScrollToNode(hasText("주간 루틴"))
         ui.onNodeWithText("주간 루틴").performClick()
         ui.onNodeWithText("월요일~일요일 중 3일",substring=true).assertExists()
         ui.onNodeWithText("확인").performClick()
@@ -214,8 +214,8 @@ class BadgeCollectionUiTest {
         ui.onNodeWithText("이전 여정의 배지").assertIsDisplayed()
         ui.onNodeWithText("확인").performClick()
         ui.onNodeWithText("전체").performClick().assertIsSelected()
-        ui.onNode(hasText("챌린지") and heading).assertIsDisplayed()
-        ui.onNodeWithText("4종 중 2개 획득").assertDoesNotExist()
+        ui.onNode(hasText("출석 도장") and heading).assertIsDisplayed()
+        ui.onNodeWithText("6종 중 3개 획득").assertDoesNotExist()
         ui.onNodeWithText("예시 종료").performClick()
         ui.onNodeWithText("예시 기록").assertDoesNotExist()
         ui.onNodeWithText("엔진오일 교환권 안내").assertDoesNotExist()

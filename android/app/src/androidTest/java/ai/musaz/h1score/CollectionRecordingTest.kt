@@ -118,7 +118,7 @@ class CollectionRecordingTest {
         ui.setContent { H1App(model) }
         val spot = SpotTour.SEOUL
         val dialog = hasAnyAncestor(isDialog())
-        ui.onNode(hasText("스팟투어") and isSelectable()).performClick()
+        ui.onNode(hasText("스팟 투어") and isSelectable()).performClick()
         ui.onNodeWithText("시연용 - 달성 예시보기").performClick()
         ui.onNodeWithText("서울 오토 라이브러리").performClick()
         ui.onNode(dialog and hasText("획득 보상 +50M")).assertIsDisplayed()

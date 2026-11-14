@@ -94,7 +94,7 @@ class ScoringDownstreamTest {
         ui.onNodeWithText("일별 최고점 평균").assertIsDisplayed()
         ui.runOnIdle { restored.navigate(Screen.BADGES) }
         val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
-        ui.onNode(hasText("안전운전") and filter).performClick()
+        ui.onNode(hasText("명예 훈장") and filter).performClick()
         val goodHabit = hasText("좋은 습관") and hasText("1 / 5일")
         ui.onNode(hasScrollToIndexAction()).performScrollToNode(goodHabit)
         ui.onNode(goodHabit).assertIsDisplayed()
@@ -311,7 +311,7 @@ class ScoringDownstreamTest {
         captureDownstream("mileage-100")
         ui.runOnIdle { restored.navigate(Screen.BADGES) }
         val filter = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
-        ui.onNode(hasText("안전운전") and filter).performClick()
+        ui.onNode(hasText("명예 훈장") and filter).performClick()
         val badge = hasText("정교한 운전") and hasText("1 / 5일")
         ui.onNode(hasScrollToIndexAction()).performScrollToNode(badge)
         ui.onNode(badge).assertIsDisplayed()

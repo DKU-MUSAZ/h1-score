@@ -67,6 +67,12 @@ private enum class BadgeFamily(val title: String, val accent: Color, val tint: C
     ROUTINE("주행 습관", Color(0xFF8270AC), Color(0xFFF2EEF8), Icons.Outlined.CalendarMonth),
     SPOT("스팟투어", H1Style.Ink, H1Style.PaleMint, Icons.Outlined.Map)
 }
+// Presentation categories are independent from the persisted earning rules.
+private enum class BadgeCategory(val title: String, val filterIcon: ImageVector) {
+    ATTENDANCE("출석 도장", Icons.Outlined.CalendarMonth),
+    HONOR("명예 훈장", Icons.Outlined.VerifiedUser),
+    SPOT("스팟 투어", Icons.Outlined.Map)
+}
 private data class CollectionBadge(
     val id: String,
     val family: BadgeFamily,
@@ -82,9 +88,15 @@ private data class CollectionBadge(
     val minimumScore: Int = 0,
     val spot: SpotTour? = null
 ) {
+    val category: BadgeCategory get() = when (family) {
+        BadgeFamily.PARTICIPATION -> BadgeCategory.ATTENDANCE
+        BadgeFamily.ROUTINE -> if (id == "routine-score") BadgeCategory.HONOR else BadgeCategory.ATTENDANCE
+        BadgeFamily.SCORE, BadgeFamily.RANK -> BadgeCategory.HONOR
+        BadgeFamily.SPOT -> BadgeCategory.SPOT
+    }
     val tier: RankTier? get() = rankGoal?.tier
     val artworkDescription: String
-        get() = "${family.title} 무사즈 배지${tier?.let { " · ${it.title} 트로피" } ?: ""}"
+        get() = "${category.title} 무사즈 배지${tier?.let { " · ${it.title} 트로피" } ?: ""}"
 
     fun recordedProgress(collection: CollectionProgress, ranks: RankBadgeProgress): Int = when (family) {
         BadgeFamily.PARTICIPATION -> collection.challengeDays
@@ -172,7 +184,7 @@ internal fun newlyEarnedCollectionBadges(
     onCancelSpot: () -> Unit = {},
     onChallenge: () -> Unit
 ) {
-    var family by remember { mutableStateOf<BadgeFamily?>(null) }
+    var family by remember { mutableStateOf<BadgeCategory?>(null) }
     var preview by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<CollectionBadge?>(null) }
     var showWelcomeBadge by remember { mutableStateOf(false) }
@@ -191,7 +203,7 @@ internal fun newlyEarnedCollectionBadges(
         return value.coerceAtMost(badge.target)
     }
     val earned = collectionBadges.filter { progress(it) == it.target }
-    val categories = family?.let { listOf(it) } ?: BadgeFamily.entries
+    val categories = family?.let { listOf(it) } ?: BadgeCategory.entries
     val scroll = rememberLazyGridState()
     CompositionLocalProvider(LocalTextStyle provides androidx.compose.ui.text.TextStyle(color=BadgeInk,fontSize=14.sp)) {
     Column(Modifier.fillMaxSize()) {
@@ -230,7 +242,7 @@ internal fun newlyEarnedCollectionBadges(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                (listOf(null) + BadgeFamily.entries).forEach { category ->
+                (listOf(null) + BadgeCategory.entries).forEach { category ->
                     val active = family == category
                     val contentColor = if (active) Color.White else BadgeInk
                     Row(
@@ -285,7 +297,7 @@ internal fun newlyEarnedCollectionBadges(
                 }
             }
             categories.forEachIndexed { index, category ->
-                val cards = collectionBadges.filter { it.family == category }
+                val cards = collectionBadges.filter { it.category == category }
                 item(key = category.name, span = { GridItemSpan(maxLineSpan) }) {
                     Row(
                         Modifier.fillMaxWidth().padding(top = if (family == null || index > 0) 12.dp else 0.dp),
@@ -299,17 +311,14 @@ internal fun newlyEarnedCollectionBadges(
                             fontWeight = FontWeight.SemiBold
                         )
                         if (family != null) {
-                            val count = if (category != BadgeFamily.RANK || rankAvailable) {
-                                "${cards.size}종 중 ${earned.count { it.family == category }}개 획득"
-                            } else {
-                                "${cards.size}종"
-                            }
+                            val count = "${cards.size}종 중 ${earned.count { it.category == category }}개 획득"
                             Text(count, fontSize = 14.sp, color = BadgeSecondaryText)
                         }
                     }
                 }
-                val groups = if (category == BadgeFamily.RANK) {
-                    RankTier.entries.map { tier -> tier to cards.filter { it.tier == tier } }
+                val groups = if (category == BadgeCategory.HONOR) {
+                    RankTier.entries.map { tier -> tier to cards.filter { it.tier == tier } } +
+                        listOf(null to cards.filter { it.rankGoal == null })
                 } else {
                     listOf(null to cards)
                 }
@@ -366,7 +375,7 @@ internal fun newlyEarnedCollectionBadges(
                 }
             }
         ) {
-            Text("${badge.family.title} 컬렉션${badge.tier?.let { " · ${it.title} 트로피" } ?: ""}",
+            Text("${badge.category.title} 컬렉션${badge.tier?.let { " · ${it.title} 트로피" } ?: ""}",
                 color = BadgeSecondaryText, fontSize = 18.sp, lineHeight = 24.sp)
             Text(badge.condition, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
             if (badge.family == BadgeFamily.RANK && !rankAvailable) {
@@ -464,14 +473,14 @@ internal fun newlyEarnedCollectionBadges(
 }
 
 @Composable private fun BadgeGuide(
-    initialFamily: BadgeFamily?,
+    initialFamily: BadgeCategory?,
     demo: Boolean,
     onDismiss: () -> Unit,
     onLegacy: () -> Unit
 ) {
-    val first = initialFamily ?: BadgeFamily.PARTICIPATION
-    val sections = listOf(first) + BadgeFamily.entries.filter { it != first }
-    var expanded by remember { mutableStateOf<BadgeFamily?>(first) }
+    val first = initialFamily ?: BadgeCategory.ATTENDANCE
+    val sections = listOf(first) + BadgeCategory.entries.filter { it != first }
+    var expanded by remember { mutableStateOf<BadgeCategory?>(first) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier.widthIn(max = 1120.dp).fillMaxWidth(.94f).fillMaxHeight(.92f),
@@ -498,7 +507,7 @@ internal fun newlyEarnedCollectionBadges(
                     items(sections, key = { it.name }) { category ->
                         val open = expanded == category
                         val status = when {
-                            category == BadgeFamily.RANK && !demo -> LiveRankPending
+                            category == BadgeCategory.HONOR && !demo -> "안전점수 집계 · 순위 연동 준비 중"
                             demo -> "시연 집계"
                             else -> "실제 기록 집계"
                         }
@@ -535,25 +544,28 @@ internal fun newlyEarnedCollectionBadges(
     }
 }
 
-@Composable private fun BadgeGuideDetails(category: BadgeFamily, demo: Boolean) {
+@Composable private fun BadgeGuideDetails(category: BadgeCategory, demo: Boolean) {
     val timing = when (category) {
-        BadgeFamily.PARTICIPATION -> "회차 안에 유효한 챌린지를 완료하고 주차하면 반영돼요. 하루에 한 번 인정돼요."
-        BadgeFamily.SCORE -> "유효한 챌린지가 끝나고 주차하면 반영돼요. 같은 날에는 회차 안에 얻은 최고 점수를 써요."
-        BadgeFamily.ROUTINE -> "회차 안에 유효한 챌린지를 완료하고 주차하면 반영돼요. 한 주는 월요일부터 일요일까지예요."
-        BadgeFamily.RANK -> "브론즈 배지 2개를 모두 모으면 실버가 열려요. 각 티어가 열린 뒤의 순위 기록부터 하루 한 번 집계해요."
-        BadgeFamily.SPOT -> if (demo) "배지 상세에서 시연 방문을 세 번 추가하면 시연 마일리지가 적립돼요."
+        BadgeCategory.ATTENDANCE -> "회차 안에 유효한 챌린지를 완료하고 주차하면 참여일이 반영돼요. 하루에 한 번 인정하며, 한 주는 월요일부터 일요일까지예요."
+        BadgeCategory.HONOR -> "안전점수 배지는 유효한 챌린지를 완료하고 주차하면 집계해요. ‘꾸준한 좋은 흐름’은 서로 다른 3개 주에서 90점 이상을 기록하면 달성해요."
+        BadgeCategory.SPOT -> if (demo) "배지 상세에서 시연 방문을 세 번 추가하면 시연 마일리지가 적립돼요."
             else "방문 기록 시작 → Pleos 내비 목적지 도착 → 주차. 장소마다 하루 한 번 기록돼요."
     }
     Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("집계 시점", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(timing, fontSize = 22.sp, lineHeight = 30.sp, color = BadgeSecondaryText)
-        if (category == BadgeFamily.PARTICIPATION || category == BadgeFamily.SCORE || category == BadgeFamily.ROUTINE) {
+        if (category != BadgeCategory.SPOT) {
             Text("유효한 챌린지는 출발 시 10km 이상이며, 기록된 유효 거리 9km 이상과 데이터 수신율 90% 이상이 기준이에요.",
                 fontSize = 20.sp, lineHeight = 28.sp, color = BadgeSecondaryText)
         }
+        if (category == BadgeCategory.HONOR) {
+            Text("브론즈 배지 2개를 모두 모으면 실버가 열려요. 각 티어가 열린 뒤의 순위 기록부터 하루 한 번 집계해요.",
+                fontSize = 20.sp, lineHeight = 28.sp, color = BadgeSecondaryText)
+            if (!demo) Text("순위 배지: $LiveRankPending", fontSize = 20.sp, color = BadgeSecondaryText)
+        }
         Text("획득 조건", Modifier.padding(top = 6.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        collectionBadges.filter { it.family == category }.forEach { badge ->
+        collectionBadges.filter { it.category == category }.forEach { badge ->
             Row(
                 Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 9.dp),
@@ -563,6 +575,9 @@ internal fun newlyEarnedCollectionBadges(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(badge.title, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold)
                     Text(badge.condition, fontSize = 20.sp, lineHeight = 26.sp, color = BadgeSecondaryText)
+                    if (badge.rankGoal != null && !demo) {
+                        Text(LiveRankPending, fontSize = 18.sp, color = BadgeSecondaryText)
+                    }
                 }
                 Text("+${badge.reward}M",
                     modifier = Modifier.widthIn(min = 86.dp)
