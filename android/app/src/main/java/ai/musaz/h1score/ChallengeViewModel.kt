@@ -854,6 +854,27 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
     private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
+        if (completedDriveStore.readAll().any { it.session.id == s.id }) return
+        val deadline=deadlineOutcome(CompletedDrive(s,currentReport(),destinationName,demo,emptyList(),0,false,
+            completedAtEpochMs=clock().toEpochMilli(),
+            participationDay=participationStore.dayFor(demo,s.id)?.toString()),arrivedAt,activeRound)
+        if (deadline != null) {
+            session=deadline.session
+            missedDeadline=true
+            completedDestinationName=deadline.name
+            report=deadline.report; progressReport=deadline.report
+            ranking=emptyList(); earned=0; badgeMileageEarned=0; pendingBadges=emptyList()
+            recordingStartedAtNanos=null; turnDetector.interrupt()
+            completedDriveStore.save(deadline)
+            completedDrives=completedDriveStore.readAll()
+            selectedHistoryRecord=deadline
+            notice="대회 종료 시각 이후에 도착해 시간 초과로 실격됐어요. 오늘 참가로 기록되며 배지·보상은 지급되지 않아요."
+            completed++
+            screen=Screen.RESULT
+            if (parked) RecordingService.notifyResult(getApplication())
+            endService()
+            return
+        }
         if (!demo && beltDecision.hadUnverifiedMotion) {
             saveBeltOutcome(s, DriveOutcome.UNVERIFIABLE, BeltFailureReason.TELEMETRY_UNAVAILABLE)
             return

@@ -19,7 +19,8 @@ internal fun historyResultLabel(drive: CompletedDrive): String = when (drive.out
 internal val CompletedDrive.beltOutcomeReason: String?
     get() = when (outcome) {
         DriveOutcome.COMPLETED -> null
-        DriveOutcome.DISQUALIFIED -> beltFailureReason?.label ?: "주행 중 안전벨트 미착용이 확인되었어요."
+        DriveOutcome.DISQUALIFIED -> if (missedDeadline) "대회 종료 시각 이후 목적지에 도착했어요."
+            else beltFailureReason?.label ?: "주행 중 안전벨트 미착용이 확인되었어요."
         DriveOutcome.UNVERIFIABLE -> beltFailureReason?.label ?: "주행 중 안전벨트 상태를 확인할 수 없었어요."
     }
 

@@ -89,7 +89,7 @@ private val Gold=H1Style.Gold
             Phase.RECORDING -> "주행 기록 중"
             Phase.AWAITING_PARK -> "주차 후 결과 공개"
             Phase.CANCELLED -> "기록 종료"
-            Phase.DISQUALIFIED -> "안전벨트 미착용 · 실격"
+            Phase.DISQUALIFIED -> if (vm.missedDeadline) "시간 초과 · 실격" else "안전벨트 미착용 · 실격"
             Phase.FINISHED -> "기록 완료"
             else -> "이번 목적지"
         },PaleMint,Green)
@@ -558,13 +558,13 @@ internal fun LiveRouteChallengeDialog(
     Column(Modifier.fillMaxSize().clip(RoundedCornerShape(28.dp)).background(Ink).padding(34.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(if(waiting) Color(0xFFD8C394) else Mint,CircleShape))
-            Text(if(idle) "차량 상태 확인 중" else if(disqualified) "안전벨트 미착용 · 실격" else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
+            Text(if(idle) "차량 상태 확인 중" else if(disqualified) { if(vm.missedDeadline) "시간 초과 · 실격" else "안전벨트 미착용 · 실격" } else if(cancelled) "기록 종료" else if(arrived) "도착 확인" else if(waiting) "참가 예약 완료" else "주행 기록 중",color=Color.White,fontSize=16.sp,fontWeight=FontWeight.Medium,modifier=Modifier.padding(start=10.dp))
             Spacer(Modifier.weight(1f))
             Text(vm.destinationName,color=Color(0xFFB7C7D8),fontSize=15.sp)
         }
         Row(Modifier.weight(1f),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1.2f)) {
-                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->"안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
+                Text(when {idle->"안전한 주차 후\n시작해 주세요.";disqualified->if(vm.missedDeadline) "대회 종료 후 도착해\n실격 처리됐어요" else "안전벨트 미착용으로\n실격 처리됐어요";cancelled->"기록을 종료했어요";arrived->"무사히 도착했어요.";waiting->"운전에만 집중하세요.";else->"좋은 흐름으로\n가고 있어요."},color=Color.White,fontSize=39.sp,lineHeight=52.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1).sp)
                 Text(when {idle->"P단·속도·차량 화면 제한을 확인하고 있어요.";disqualified->"이번 점수·순위·보상은 지급하지 않아요.";cancelled->"주차 후 새 목적지로 참가해 주세요.";arrived->"P단으로 주차하면 결과가 열려요.";waiting->"남은 경로가 10km가 되면\n기록을 자동으로 시작할게요.";else->"순위와 보상은 주차한 뒤 알려드릴게요."},color=Color(0xFFAFBDCC),fontSize=17.sp,lineHeight=28.sp,modifier=Modifier.padding(top=19.dp))
                 Spacer(Modifier.height(35.dp))
                 Row(verticalAlignment=Alignment.Bottom) {
