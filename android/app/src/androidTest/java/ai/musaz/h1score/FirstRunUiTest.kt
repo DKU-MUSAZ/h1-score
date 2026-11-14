@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.*
 import androidx.compose.ui.test.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.junit.Assert.*
 import org.junit.Rule
@@ -25,16 +26,33 @@ class FirstRunUiTest {
             init {attachBaseContext(ui.activity.applicationContext)}
             override fun getSharedPreferences(name:String,mode:Int)=prefs
         }
+        var driving by mutableStateOf(false)
+        fun vehicle() = LiveVehicle(
+            speedMps = if (driving) 2.0 else 0.0,
+            speedAt = SystemClock.elapsedRealtime(),
+            gearPark = !driving,
+            uxRestricted = driving,
+        )
         val vm=ui.runOnIdle { ChallengeViewModel(app).apply {
-            receiveVehicle(LiveVehicle(speedMps=0.0,speedAt=Long.MAX_VALUE,gearPark=true,uxRestricted=false))
+            receiveVehicle(vehicle())
         } }
         if(!video) ui.runOnIdle {vm.addShortcut("학교")}
         var generation by mutableIntStateOf(0)
-        ui.setContent {key(generation) {FirstRunHost(vm,prefs,{})}}
+        ui.setContent {
+            LaunchedEffect(Unit) {
+                while (true) {
+                    vm.receiveVehicle(vehicle())
+                    delay(500)
+                }
+            }
+            key(generation) { FirstRunHost(vm, prefs, {}) }
+        }
         fun capture(name:String) {
             ui.waitForIdle()
             if(video) {
                 SystemClock.sleep(2500)
+                ui.runOnIdle { vm.receiveVehicle(vehicle()) }
+                ui.waitForIdle()
                 File(ui.activity.filesDir,"first-run-video-timing.txt").appendText("$name ${SystemClock.elapsedRealtime()}\n")
                 InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()?.let {bitmap ->
                     File(ui.activity.filesDir,"first-run-$name.png").outputStream().use {bitmap.compress(Bitmap.CompressFormat.PNG,100,it)}
@@ -49,10 +67,10 @@ class FirstRunUiTest {
         ui.onNodeWithTag("data-consent").performClick()
         if(!video) {
             ui.onNodeWithText("이용 항목과 보관 방법 자세히 보기").performClick()
-            ui.runOnIdle {vm.receiveVehicle(LiveVehicle(speedMps=2.0,speedAt=Long.MAX_VALUE,gearPark=false,uxRestricted=true))}
+            ui.runOnIdle { driving = true; vm.receiveVehicle(vehicle()) }
             ui.onNodeWithText("확인").assertDoesNotExist()
             ui.onNodeWithText("동의하고 계속").assertIsNotEnabled()
-            ui.runOnIdle {vm.receiveVehicle(LiveVehicle(speedMps=0.0,speedAt=Long.MAX_VALUE,gearPark=true,uxRestricted=false))}
+            ui.runOnIdle { driving = false; vm.receiveVehicle(vehicle()) }
         }
         ui.onNodeWithText("동의하고 계속").performClick()
         ui.runOnIdle {generation++}
@@ -65,7 +83,11 @@ class FirstRunUiTest {
         ui.onNodeWithText("닉네임으로 시작").performClick()
         ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
         capture("05-tour-search")
-        repeat(4) {ui.onNodeWithText("다음").performClick();capture("tour-${it+2}")}
+        repeat(4) { step ->
+            ui.onNodeWithText("다음").performClick()
+            ui.onNodeWithText("무사즈의 첫 안내  ${step + 2} / 5").assertIsDisplayed()
+            capture("tour-${step + 2}")
+        }
         ui.onNodeWithText("무사즈와 출발하기").performClick()
         capture("10-complete")
         ui.runOnIdle {assertEquals("무사즈 친구",vm.nickname);generation++}
@@ -78,7 +100,7 @@ class FirstRunUiTest {
             val shortcuts=vm.destinationShortcuts
             val setupBefore=prefs.all.filterKeys {it.startsWith("first-run-")}
             ui.runOnIdle {vm.navigate(Screen.PROFILE)}
-            ui.onNodeWithText("튜토리얼 다시보기").performClick()
+            ui.onNodeWithText("사용법 다시 보기").performClick()
             ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
             ui.onNodeWithText("무사즈와 시작하기").assertDoesNotExist()
             ui.onNodeWithText("동의하고 계속").assertDoesNotExist()
@@ -91,9 +113,9 @@ class FirstRunUiTest {
             ui.runOnIdle {generation++;vm.navigate(Screen.PROFILE)}
             ui.onNodeWithText("목적지를 정해볼까요?").assertDoesNotExist()
             // A second replay starts at the first menu and can be skipped.
-            ui.onNodeWithText("튜토리얼 다시보기").performClick()
+            ui.onNodeWithText("사용법 다시 보기").performClick()
             ui.onNodeWithText("목적지를 정해볼까요?").assertIsDisplayed()
-            ui.onNodeWithText("건너뛰기").performClick()
+            ui.onNodeWithText("바로 시작하기").performClick()
             ui.runOnIdle {generation++}
             ui.onNodeWithText("목적지를 정해볼까요?").assertDoesNotExist()
             ui.runOnIdle {

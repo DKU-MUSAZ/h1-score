@@ -65,9 +65,11 @@ class MapChallengeTest {
     }
     @Test fun nearbyDestinationShowsChallengeBeforeOpeningNavigation() {
         searchFor("더현대 서울")
-        ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?").assertIsDisplayed()
-        ui.onNodeWithText("내비 목적지 · 더현대 서울", substring = true).assertIsDisplayed()
-        ui.onNodeWithText("여의도 한강공원 · 참가 예시", substring = true).assertIsDisplayed()
+        val title = ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?")
+        ui.waitUntil(5_000) { title.isDisplayed() }
+        ui.onNode(hasText("내비 목적지") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNode(hasText("더현대 서울") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNodeWithText("더현대 서울에서 1km 이내에 있는 가장 가까운 개최지예요.").assertIsDisplayed()
         ui.onNodeWithText("내장 내비에서 검색할까요?").assertDoesNotExist()
         screenshot("nearby-destination")
     }
@@ -87,6 +89,37 @@ class MapChallengeTest {
         ui.onNodeWithText("검색 계속").performClick()
         ui.onNode(hasSetTextAction()).assertTextContains(keyword)
         ui.onNodeWithText("내장 내비에서 검색할까요?").assertDoesNotExist()
+    }
+
+    @Test fun liveKakaoSuggestionsUpdateWhileTypingAndOpenNearbyChallenge() {
+        org.junit.Assume.assumeTrue(BuildConfig.KAKAO_LOCAL_REST_API_KEY.isNotBlank())
+        val skipTutorial = ui.onNodeWithText("바로 시작하기")
+        if (skipTutorial.isDisplayed()) skipTutorial.performClick()
+        val search = ui.onNode(hasSetTextAction())
+        ui.waitUntil(15_000) { ui.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        search.performClick().performTextInput("한")
+
+        fun waitForSuggestion(name: String) {
+            ui.waitUntil(10_000) { ui.onAllNodesWithText(name).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithText(name).assertIsDisplayed()
+        }
+
+        waitForSuggestion("한 끗 본점")
+        search.performTextInput("강")
+        waitForSuggestion("여의도한강공원 1주차장")
+        ui.onNodeWithText("한 끗 본점").assertDoesNotExist()
+        screenshot("live-kakao-hangang")
+
+        search.performTextReplacement("더현대")
+        waitForSuggestion("더현대 서울")
+        ui.onNodeWithText("더현대 서울").performClick()
+        val title = ui.onNodeWithText("이 목적지로 챌린지에 참가할까요?")
+        ui.waitUntil(5_000) { title.isDisplayed() }
+        ui.onNode(hasText("여의도 한강공원") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNode(hasText("내비 목적지") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNode(hasText("더현대 서울") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        ui.onNodeWithText("더현대 서울에서 1km 이내에 있는 가장 가까운 개최지예요.").assertIsDisplayed()
+        screenshot("live-kakao-hyundai-challenge")
     }
 
     private fun searchFor(keyword: String) {
