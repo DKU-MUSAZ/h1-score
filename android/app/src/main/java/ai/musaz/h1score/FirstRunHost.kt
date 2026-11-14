@@ -169,7 +169,7 @@ private val tourSteps=listOf(
         }
     }
     if(details && vm.parked) AlertDialog(onDismissRequest={details=false},containerColor=Color.White,shape=RoundedCornerShape(32.dp),title={Text("데이터 이용 안내",fontSize=30.sp,lineHeight=40.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)},text={ProvideTextStyle(LocalTextStyle.current.copy(fontSize=18.sp,lineHeight=28.sp,color=H1Style.Muted)) {Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        Text("• 닉네임, 목적지 바로가기, 누적 주행 거리, 배지, 마일리지 잔액: 이 기기의 앱 저장소에 보관해요.")
+        Text("• 닉네임, 목적지 바로가기, 누적 주행 거리, 배지, 시연 잔액: 이 기기의 앱 저장소에 보관해요.")
         Text("• 속도·제한속도·목적지 정보: 사용자가 참가한 주행의 평가에 사용해요. 차량 P단·정지·안전벨트 등은 안전한 이용 상태 확인에 사용해요.")
         Text("• 앱의 별도 계정 서버 전송 기능은 없어요. 지도·내비 요청은 연결된 서비스에서 처리하며 해당 서비스의 정책이 적용돼요.")
         Text("• 앱 데이터 삭제 또는 제거 시 앱에 저장한 정보가 지워져요. 시스템 설정에서 권한과 알림을 변경할 수 있어요.")

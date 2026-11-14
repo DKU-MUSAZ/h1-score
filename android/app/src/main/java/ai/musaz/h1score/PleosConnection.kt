@@ -21,9 +21,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import ai.pleos.playground.vehicle.Vehicle
-import ai.pleos.playground.vehicle.api.model.area.DoorArea
-import ai.pleos.playground.vehicle.api.model.area.WindowArea
-import ai.pleos.playground.vehicle.api.model.capability.AreaBounds
 import ai.pleos.playground.vehicle.api.model.capability.AccessType
 import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
@@ -54,19 +51,13 @@ data class LiveVehicle(
     val remainingM: Double? = null, val destinationAt: Long = 0,
     val speedMps: Double? = null, val speedAt: Long = 0,
     val speedTimestampNanos: Long = 0,
-    // Signed AAOS speed is kept separately: belt validity includes reversing, scoring stays unchanged.
-    val motionSpeedMps: Double? = null, val motionSpeedAt: Long = 0,
     val limitKph: Int? = null, val limitAt: Long = 0,
     val gearCode: Int? = null, val gearPark: Boolean? = null, val uxRestricted: Boolean? = null,
-    val gearAt: Long = 0,
     val belt: Boolean? = null, val beltAt: Long = 0, val beltWarningOnAt: Long? = null,
-    val passengerOccupied: Boolean? = null, val passengerOccupiedAt: Long = 0,
-    val passengerBelt: Boolean? = null, val passengerBeltAt: Long = 0,
     val beltWarningOffAt: Long? = null, val brake: Boolean? = null, val brakeAt: Long = 0,
     val turnSignal: String? = null, val turnAt: Long = 0,
-    val hazardOn: Boolean? = null, val hazardAt: Long = 0,
     val gps: GpsFix? = null, val forward: Boolean? = null,
-    // Raw Pleos steering-wheel angle. Console tests on Connect 2.1 observed left positive.
+    // Vehicle 2.3.2 forwards PERF_STEERING_ANGLE: front-wheel degrees, left negative.
     val steeringDeg: Double? = null, val steeringAt: Long = 0,
     val instruction: TurnDirection? = null, val instructionDistanceM: Double? = null, val instructionAt: Long = 0,
     val odometer: Float? = null, val odometerAt: Long = 0,
@@ -74,27 +65,16 @@ data class LiveVehicle(
     val arrived: Boolean = false, val routeCancelled: Boolean = false,
     val statuses: Map<String,String> = emptyMap(),
 ) {
-    fun beltObservation(now: Long) = BeltObservation(now, when (gearCode) {
-        VehicleGear.GEAR_PARK -> BeltGear.PARK
-        VehicleGear.GEAR_NEUTRAL -> BeltGear.NEUTRAL
-        VehicleGear.GEAR_DRIVE -> BeltGear.DRIVE
-        VehicleGear.GEAR_REVERSE -> BeltGear.REVERSE
-        else -> null
-    }, gearAt, motionSpeedMps, motionSpeedAt, belt, beltAt,
-        passengerOccupied, passengerOccupiedAt, passengerBelt, passengerBeltAt)
-    fun turnObservation(now: Long) = TurnObservation(now,gps,
-        speedMps.takeIf { now-speedAt in 0..750 },forward==true && now-gearAt in 0..2500,
-        steeringDeg.takeIf { now-steeringAt in 0..750 }?.unaryMinus(),
+    fun turnObservation(now: Long) = TurnObservation(now,gps,freshSpeed(now),forward==true,
+        steeringDeg.takeIf { now-steeringAt in 0..1500 },
         turnSignal.takeIf { now-turnAt in 0..1500 }?.let { runCatching { SignalState.valueOf(it) }.getOrNull() },
-        instruction,instructionDistanceM,instructionAt,turnAt,steeringAt,
-        hazardOn.takeIf { now-hazardAt in 0..750 })
+        instruction,instructionDistanceM,instructionAt)
     val parked: Boolean get() = isParked(SystemClock.elapsedRealtime())
     fun isParked(now: Long) = now-speedAt in 0..2500 && gearPark == true && uxRestricted == false && speedMps?.let { it < .1 } == true
     fun freshBelt(now: Long): Boolean? = belt.takeIf { now - beltAt in 0..2500 } ?:
         if (beltWarningOnAt?.let { now-it in 0..2500 } == true) false
         else if (beltWarningOffAt?.let { now-it in 0..2500 } == true) true else null
-    // A silent warning is not proof of a fastened belt while parked.
-    val beltConditionMet: Boolean get() = belt == true && SystemClock.elapsedRealtime() - beltAt in 0..2500
+    val beltConditionMet: Boolean get() = freshBelt(SystemClock.elapsedRealtime()) == true
     fun freshSpeed(now: Long) = speedMps.takeIf { now - speedAt in 0..2_500 }
     fun freshLimit(now: Long) = limitKph.takeIf { now - limitAt in 0..NAVIGATION_SPEED_LIMIT_MAX_AGE_MS }
 }
@@ -157,54 +137,6 @@ internal class ScoringSampleBuffer(private val onOverflow: () -> Unit = {}) {
 
 /** Read-only adapter. No synthetic fallback values are emitted on connection failure. */
 class PleosConnection(private val context: Context) {
-    private val beltObservations = ArrayDeque<BeltObservation>()
-    private var beltOverflow = false
-    private val seatRequests = mutableMapOf<String, Long>()
-    private val seatReader = PleosSeatReader(context, ::onSeatSourceUnavailable)
-
-    private fun onSeatSourceUnavailable() {
-        seatRequests.clear()
-        updateState { it.copy(belt=null, beltAt=0, passengerBelt=null, passengerBeltAt=0,
-            passengerOccupied=null, passengerOccupiedAt=0) }
-    }
-
-    // StateFlow may conflate an invalid read and its recovery. Preserve validity evidence.
-    private fun updateState(change: (LiveVehicle) -> LiveVehicle) {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            main.post { updateState(change) }
-            return
-        }
-        val next=change(state.value)
-        if (beltObservations.size == 512) { beltObservations.removeFirst(); beltOverflow=true }
-        beltObservations.addLast(next.beltObservation(SystemClock.elapsedRealtime()))
-        state.value=next
-    }
-
-    internal fun drainBeltObservations(): List<BeltObservation> {
-        check(Looper.myLooper() == Looper.getMainLooper())
-        val result=beltObservations.toList()
-        beltObservations.clear()
-        val lost=beltOverflow
-        beltOverflow=false
-        return if (lost && result.isNotEmpty()) listOf(result.first().copy(
-            gear=BeltGear.DRIVE, gearAtMs=result.first().atMs, speedMps=null, driverBuckled=null, passengerOccupied=null)) + result else result
-    }
-
-    private fun readSeat(source: Vehicle, epoch: Int, key: String,
-        request: ((Boolean?) -> Unit, (Exception) -> Unit) -> Unit,
-        apply: (Boolean?, Long) -> Unit,
-    ) {
-        val requestedAt=SystemClock.elapsedRealtime()
-        seatRequests[key]=requestedAt
-        fun complete(value: Boolean?) = withCurrentVehicle(source, epoch) {
-            if (seatRequests[key] == requestedAt) {
-                // Response time is not the sample time. Ignore superseded replies and bound latency.
-                val timely=SystemClock.elapsedRealtime()-requestedAt in 0..500
-                apply(value.takeIf { timely }, if (timely && value != null) requestedAt else 0)
-            }
-        }
-        runCatching { request({ complete(it) }, { complete(null) }) }.onFailure { complete(null) }
-    }
     // Explicit emulator-only test capture, never a fallback for production telemetry.
     // Missing/invalid vehicle speed and source timestamps remain invalid in this mode.
     private var consoleCapture = false
@@ -222,57 +154,32 @@ class PleosConnection(private val context: Context) {
     /** Extra read-only telemetry requested only while My Page is visible. */
     internal suspend fun readProfileEnergy(): ProfileEnergy = kotlinx.coroutines.coroutineScope {
         val source=vehicle?.takeIf { active } ?: return@coroutineScope ProfileEnergy()
-        val range = async { profileRead<Float> { ok, fail -> source.getOdometer().getRangeRemainingDistance(ok, fail) } }
-        val locks = async {
-            val areas = profileRead<List<DoorArea>> { ok, fail ->
-                source.getDoor().checkDoorLockCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
-            }.orEmpty()
-            areas.map { area -> async {
-                val locked = profileRead<Boolean> { ok, fail -> source.getDoor().getDoorLockState(area, ok, fail) }
-                area.values.map { it.name to locked }
-            } }.flatMap { it.await() }.toMap()
-        }
-        val chargePort = async { profileRead<Boolean> { ok, fail ->
-            source.getEvBattery().checkEvChargePortOpenCapabilities({ capability ->
-                if (readable(capability)) source.getEvBattery().isEvChargePortOpen(ok, fail) else ok(null)
-            }, fail)
-        } }
-        val lowBeam = async { profileRead<String> { ok, fail ->
-            source.getLight().checkLowBeamLightStateCapabilities({ capability, _ ->
-                if (readable(capability)) source.getLight().getCurrentLowBeamLightState({ ok(it?.name) }, fail) else ok(null)
-            }, fail)
-        } }
-        val highBeam = async { profileRead<String> { ok, fail ->
-            source.getLight().checkHighBeamLightStateCapabilities({ capability, _ ->
-                if (readable(capability)) source.getLight().getCurrentHighBeamLightState({ ok(it?.name) }, fail) else ok(null)
-            }, fail)
-        } }
-        val doors = async {
-            val areas = profileRead<Map<DoorArea, AreaBounds<Int>>> { ok, fail ->
-                source.getDoor().checkDoorPositionCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
-            }.orEmpty()
-            areas.map { (area, bounds) -> async {
-                val open = profileRead<Int> { ok, fail -> source.getDoor().getCurrentDoorPosition(area, ok, fail) }
-                    ?.takeIf { it in bounds.minValue..bounds.maxValue }?.let { it != 0 }
-                area.values.map { it.name to open }
-            } }.flatMap { it.await() }.toMap()
-        }
-        val windows = async {
-            val areas = profileRead<Map<WindowArea, AreaBounds<Int>>> { ok, fail ->
-                source.getWindow().checkWindowPositionCapabilities({ capability, areas -> ok(areas.takeIf { readable(capability) }) }, fail)
-            }.orEmpty()
-            areas.map { (area, bounds) -> async {
-                val open = profileRead<Int> { ok, fail -> source.getWindow().getCurrentWindowPosition(area, ok, fail) }
-                    ?.takeIf { it in bounds.minValue..bounds.maxValue }?.let { it != 0 }
-                area.values.map { it.name to open }
-            } }.flatMap { it.await() }.toMap()
-        }
         val battery=async { profileRead<Int> { ok, fail -> source.getEvBattery().getEvBatteryStateOfCharge(ok,fail) } }
+        val fuel=async { profileRead<Int> { ok, fail -> source.getFuel().getFuelPercent(ok,fail) } }
+        val oil=async { profileRead<String> { ok, fail -> source.getSafety().getEngineOilLevelState({ ok(it?.name) },fail) } }
+        val steering=async { profileRead<Float> { ok, fail -> source.getSteeringWheel().getCurrentSteeringWheelAngle(ok,fail) } }
+        val washerFluidLow=async { profileRead<Boolean> { ok, fail ->
+            source.getSafety().checkLowWasherFluidWarningStateCapabilities({ capability ->
+                if(readable(capability)) source.getSafety().hasLowWasherFluidWarning(ok,fail) else ok(null)
+            },fail)
+        } }
+        val evEfficiency=async { profileRead<Float> { ok, fail ->
+            source.getEvBattery().checkCurrentEvEfficiencyCapabilities({ capability ->
+                if(readable(capability)) source.getEvBattery().getCurrentEvEfficiency(ok,fail) else ok(null)
+            },fail)
+        } }
+        val fuelEconomy=async { profileRead<Float> { ok, fail ->
+            source.getFuel().checkCurrentFuelEconomyCapabilities({ capability ->
+                if(readable(capability)) source.getFuel().getCurrentFuelEconomy(ok,fail) else ok(null)
+            },fail)
+        } }
         val result=ProfileEnergy(
-            rangeMeters = range.await()?.takeIf { it.isFinite() && it >= 0f },
-            doorOpen = doors.await(), windowOpen = windows.await(), doorLocked = locks.await(),
-            chargePortOpen = chargePort.await(), lowBeam = lowBeam.await(), highBeam = highBeam.await(),
             battery=battery.await()?.takeIf { it in 0..100 },
+            fuel=fuel.await()?.takeIf { it in 0..100 },
+            oil=oil.await(), steering=steering.await()?.takeIf { it.isFinite() },
+            washerFluidLow=washerFluidLow.await(),
+            evEfficiency=evEfficiency.await()?.takeIf { it.isFinite() && it>=0f },
+            fuelEconomy=fuelEconomy.await()?.takeIf { it.isFinite() && it>=0f },
         )
         if(active && vehicle===source) result else ProfileEnergy()
     }
@@ -311,7 +218,7 @@ class PleosConnection(private val context: Context) {
     private val locations=context.getSystemService(LocationManager::class.java)
     private val locationListener=object: LocationListener {
         override fun onLocationChanged(location: Location) { if (active) receiveLocation(location) }
-        override fun onProviderDisabled(provider: String) { updateState { it.copy(gps=null) };status("GPS","위치 제공 중단 · 회전 감점 보류") }
+        override fun onProviderDisabled(provider: String) { state.update { it.copy(gps=null) };status("GPS","위치 제공 중단 · 회전 감점 보류") }
         override fun onProviderEnabled(provider: String) {}
         override fun onStatusChanged(provider: String?,status: Int,extras: android.os.Bundle?) {}
     }
@@ -319,14 +226,14 @@ class PleosConnection(private val context: Context) {
         val fix=if(location.hasAccuracy() && location.hasBearing() && location.hasBearingAccuracy()) GpsFix(
             location.elapsedRealtimeNanos/1_000_000,location.latitude,location.longitude,location.accuracy.toDouble(),
             location.bearing.toDouble(),location.bearingAccuracyDegrees.toDouble()) else null
-        updateState { it.copy(gps=fix) }
+        state.update { it.copy(gps=fix) }
         status("GPS",if(fix?.usable(SystemClock.elapsedRealtime())==true) "회전 판정 가능" else "정확도 부족 · 회전 감점 보류")
     }
     fun refreshLocationPermission() {
         if(!active)return
         if(context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
             runCatching { locations.removeUpdates(locationListener) }
-            updateState { it.copy(gps=null) }
+            state.update { it.copy(gps=null) }
             status("GPS","정확한 위치 권한 필요 · 회전 감점 보류");return
         }
         runCatching { locations.removeUpdates(locationListener); locations.requestLocationUpdates(LocationManager.GPS_PROVIDER,250L,0f,locationListener,Looper.getMainLooper()) }
@@ -334,12 +241,10 @@ class PleosConnection(private val context: Context) {
     }
     private var odoReady = false
     private var driverSeat: SeatArea? = null
-    private var passengerSeat: SeatArea? = null
-    private var passengerOccupancySeat: SeatArea? = null
     private val useEmulatorTelltale = BuildConfig.DEBUG && Build.HARDWARE == "ranchu"
     private var observedSeatBeltTelltale = false
     private var cycles = 0
-    private fun status(key: String, value: String) { if(state.value.statuses[key] != value.take(140)) android.util.Log.d("H1Sdk", "$key: $value"); updateState { it.copy(statuses = it.statuses + (key to value.take(140))) } }
+    private fun status(key: String, value: String) { if(state.value.statuses[key] != value.take(140)) android.util.Log.d("H1Sdk", "$key: $value"); state.update { it.copy(statuses = it.statuses + (key to value.take(140))) } }
     private fun readable(c: CapabilityConfig) = c.accessType in listOf(AccessType.READ,AccessType.READ_WRITE)
     private fun withCurrentNavigation(source: NaviHelper, epoch: Int, action: () -> Unit) {
         val update = Runnable { if (active && epoch == generation && navi === source) action() }
@@ -359,7 +264,7 @@ class PleosConnection(private val context: Context) {
     private fun markSpeedUnavailable(message: String) {
         val now = SystemClock.elapsedRealtimeNanos()
         enqueueSample(Sample(now / 1_000_000, null, null, speedTimestampNanos = now))
-        updateState { it.copy(speedMps = null, speedTimestampNanos = 0, motionSpeedMps = null, motionSpeedAt = 0) }
+        state.update { it.copy(speedMps = null, speedTimestampNanos = 0) }
         status("차량 속도", message)
     }
 
@@ -398,9 +303,6 @@ class PleosConnection(private val context: Context) {
                     val speed = if (value.status == CarPropertyValue.STATUS_AVAILABLE && timely)
                         (value.value as? Float)?.toDouble()?.takeIf { it.isFinite() && it in 0.0..80.0 }
                         else null
-                    val motionSpeed = if (value.status == CarPropertyValue.STATUS_AVAILABLE && timely)
-                        (value.value as? Float)?.toDouble()?.takeIf { it.isFinite() && kotlin.math.abs(it) <= 80.0 }
-                        else null
                     // Invalid observations retain a barrier; never give them a synthetic speed.
                     val sampleNs = if (timely) timestamp else receivedNs
                     val current = state.value
@@ -411,8 +313,7 @@ class PleosConnection(private val context: Context) {
                         brakePressed = current.brake.takeIf { brakeFresh },
                         brakeObservedAtMs = current.brakeAt.takeIf { brakeFresh }))
                     // Enqueue first so a resulting arrival/phase update can drain the entire trace.
-                    updateState { it.copy(speedMps = speed, speedAt = if (speed != null) timestamp / 1_000_000 else 0,
-                        motionSpeedMps = motionSpeed, motionSpeedAt = if (motionSpeed != null) timestamp / 1_000_000 else 0,
+                    state.update { it.copy(speedMps = speed, speedAt = if (speed != null) timestamp / 1_000_000 else 0,
                         speedTimestampNanos = if (speed != null) timestamp else 0) }
                 }
                 override fun onErrorEvent(propertyId: Int, areaId: Int) {
@@ -436,13 +337,13 @@ class PleosConnection(private val context: Context) {
                 val receivedAt = SystemClock.elapsedRealtime()
                 main.post {
                     if (active && vehicle === source && brakeListener === this)
-                        updateState { it.copy(brake = status, brakeAt = receivedAt) }
+                        state.update { it.copy(brake = status, brakeAt = receivedAt) }
                 }
             }
             override fun onFailed(exception: Exception) {
                 main.post {
                     if (active && vehicle === source && brakeListener === this)
-                        updateState { it.copy(brake = null, brakeAt = 0) }
+                        state.update { it.copy(brake = null, brakeAt = 0) }
                 }
             }
         }
@@ -460,7 +361,7 @@ class PleosConnection(private val context: Context) {
     }
     private fun navigationEvents(source: NaviHelper, epoch: Int) = object : NaviHelperEventListener {
         override fun onRouteStarted(routeStartInfo: RouteStartInfo) = withCurrentNavigation(source, epoch) {
-            updateState { it.copy(limitKph=null,limitAt=0,instruction=null,instructionAt=0) }
+            state.update { it.copy(limitKph=null,limitAt=0,instruction=null,instructionAt=0) }
         }
         override fun onTBTInfo(tbtInfoList: List<TBTInfo>) {
             val receivedAt = SystemClock.elapsedRealtime()
@@ -471,7 +372,7 @@ class PleosConnection(private val context: Context) {
                 else -> null
             }
             withCurrentNavigation(source, epoch) {
-                updateState { it.copy(instruction=direction,instructionDistanceM=next?.distance,instructionAt=receivedAt) }
+                state.update { it.copy(instruction=direction,instructionDistanceM=next?.distance,instructionAt=receivedAt) }
                 status("회전 안내",direction?.let { "$it · ${next?.distance}m" } ?: "좌우회전 판정 대기")
             }
         }
@@ -481,7 +382,7 @@ class PleosConnection(private val context: Context) {
             val destination = destinationInfo.name.takeIf { it.isNotBlank() }
             val destinationId = key.takeIf { destination != null }
             withCurrentNavigation(source, epoch) {
-                updateState {
+                state.update {
                     // Some providers report the new destination without a preceding change
                     // event. Do not carry the old route's road limit into that destination.
                     val changed = it.destinationId != null && it.destinationId != destinationId
@@ -499,7 +400,7 @@ class PleosConnection(private val context: Context) {
             val receivedAt = SystemClock.elapsedRealtime()
             withCurrentNavigation(source, epoch) {
                 val validLimit = speedLimit.takeIf { it in 1..150 }
-                updateState { it.copy(limitKph = validLimit, limitAt = if(validLimit != null) receivedAt else 0) }
+                state.update { it.copy(limitKph = validLimit, limitAt = if(validLimit != null) receivedAt else 0) }
                 status("제한속도", "$speedLimit km/h · 콜백 수신")
             }
         }
@@ -508,28 +409,28 @@ class PleosConnection(private val context: Context) {
             withCurrentNavigation(source, epoch) {
                 // Pending samples keep their own limit snapshot, so arrival can invalidate
                 // future input while the recorder still drains its final pre-arrival samples.
-                updateState { it.copy(arrived = true, arrivedAt = it.arrivedAt ?: receivedAt,limitKph=null,limitAt=0) }
+                state.update { it.copy(arrived = true, arrivedAt = it.arrivedAt ?: receivedAt,limitKph=null,limitAt=0) }
             }
         }
         override fun onDestinationChanged() = withCurrentNavigation(source, epoch) {
-            updateState { it.copy(arrived = false, arrivedAt = null, routeCancelled = false, limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
+            state.update { it.copy(arrived = false, arrivedAt = null, routeCancelled = false, limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
             source.getDestinationInfo()
         }
         override fun onRouteCancelled() = withCurrentNavigation(source, epoch) {
-            updateState { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,limitAt=0,arrived = false,arrivedAt = null,destinationPoint = null,routeCancelled = true,instruction=null,instructionAt=0) }
+            state.update { it.copy(destination = null,destinationId = null,remainingM = null,limitKph = null,limitAt=0,arrived = false,arrivedAt = null,destinationPoint = null,routeCancelled = true,instruction=null,instructionAt=0) }
         }
         override fun onReRouteEnded() = withCurrentNavigation(source, epoch) {
-            updateState { it.copy(limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
+            state.update { it.copy(limitKph = null,limitAt=0,instruction=null,instructionAt=0) }
             source.getDestinationInfo()
         }
         override fun onNavigationStatus(status: NavigationStatus) = withCurrentNavigation(source, epoch) {
             if (status == NavigationStatus.INACTIVE || status == NavigationStatus.INITIALIZING)
-                updateState { it.copy(limitKph=null,limitAt=0) }
+                state.update { it.copy(limitKph=null,limitAt=0) }
         }
         override fun onError(errorCode: NaviErrorCode) = withCurrentNavigation(source, epoch) {
             // Low battery is an unrelated warning, not evidence that the road limit is stale.
             if (errorCode != NaviErrorCode.CAUSE_LOW_BATTERY)
-                updateState { it.copy(limitKph=null,limitAt=0) }
+                state.update { it.copy(limitKph=null,limitAt=0) }
             status("NaviHelper", "대기 / ${errorCode.name}")
         }
     }
@@ -569,8 +470,6 @@ class PleosConnection(private val context: Context) {
         val connectionGeneration = generation
         observedSeatBeltTelltale = false
         active = true; cycles=0; brakeReady=false; turnReady=false; steeringReady=false; odoReady=false; driverSeat=null
-        passengerSeat=null; passengerOccupancySeat=null
-        seatReader.start()
         status("Vehicle", "서비스 연결 중")
         runCatching { vehicle = Vehicle(context).also { it.initialize() } }.onFailure { status("Vehicle", it.javaClass.simpleName) }
         runCatching {
@@ -584,12 +483,12 @@ class PleosConnection(private val context: Context) {
                 }
             }, onFailed = { failure -> withCurrentNavigation(helper, connectionGeneration) {
                 naviReady = false
-                updateState { it.copy(limitKph=null,limitAt=0) }
+                state.update { it.copy(limitKph=null,limitAt=0) }
                 status("NaviHelper", "연결 실패 · ${failure.javaClass.simpleName}")
             } })
         }.onFailure {
             naviReady = false
-            updateState { it.copy(limitKph=null,limitAt=0) }
+            state.update { it.copy(limitKph=null,limitAt=0) }
             status("NaviHelper", it.javaClass.simpleName)
         }
         runCatching {
@@ -606,7 +505,7 @@ class PleosConnection(private val context: Context) {
                     unsubscribeSpeed()
                     properties = null; ux = null
                     markSpeedUnavailable("서비스 연결 해제")
-                    updateState { it.copy(gearCode=null,gearPark=null,forward=null,uxRestricted=null) }; status("AAOS", "연결 해제")
+                    state.update { it.copy(gearCode=null,gearPark=null,forward=null,uxRestricted=null) }; status("AAOS", "연결 해제")
                 }
             }
         }.onFailure { status("AAOS", "사용 불가 · ${it.javaClass.simpleName}") }
@@ -627,17 +526,10 @@ class PleosConnection(private val context: Context) {
                 v.getOdometer().checkCurrentDistanceDrivenCapabilities({ c -> odoReady = readable(c); status("Odometer", "권한 ${c.accessType}") }, { status("Odometer", it.javaClass.simpleName) })
                 v.getSeat().checkSeatBeltBuckledCapabilities({ c: CapabilityConfig, areas: List<SeatArea> ->
                     withCurrentVehicle(v, epoch) {
-                        driverSeat = if (readable(c)) areas.firstOrNull { a -> a.values.size == 1 && a.values.contains(SeatValue.ROW_1_LEFT) } else null
-                        passengerSeat = if (readable(c)) areas.firstOrNull { a -> a.values.size == 1 && a.values.contains(SeatValue.ROW_1_RIGHT) } else null
+                        driverSeat = if (readable(c)) areas.firstOrNull { a -> a.values.contains(SeatValue.ROW_1_LEFT) } else null
                         status("Seat", if(driverSeat != null) "앞좌석 왼쪽 지원 · LHD 시연" else "운전석 영역 미지원")
                     }
                 }, { failure -> withCurrentVehicle(v, epoch) { status("Seat", failure.javaClass.simpleName) } })
-                v.getSeat().checkSeatOccupancyCapabilities({ c, areas ->
-                    withCurrentVehicle(v, epoch) {
-                        passengerOccupancySeat = if (readable(c)) areas.firstOrNull { a -> a.values.size == 1 && a.values.contains(SeatValue.ROW_1_RIGHT) } else null
-                        status("조수석 탑승", if (passengerOccupancySeat != null) "조회 지원" else "미지원 · 비탑승으로 추정하지 않음")
-                    }
-                }, { failure -> withCurrentVehicle(v, epoch) { status("조수석 탑승", failure.javaClass.simpleName) } })
             }.onFailure { status("Vehicle", it.javaClass.simpleName) }
         }
     }
@@ -654,9 +546,9 @@ class PleosConnection(private val context: Context) {
                 runCatching {
                     val gear = p.getIntProperty(VehiclePropertyIds.GEAR_SELECTION,0)
                     val restricted = ux?.currentCarUxRestrictions?.isRequiresDistractionOptimization
-                    updateState { it.copy(gearCode=gear,gearAt=SystemClock.elapsedRealtime(),gearPark=gear==VehicleGear.GEAR_PARK,forward=gear==VehicleGear.GEAR_DRIVE,uxRestricted=restricted) }
+                    state.update { it.copy(gearCode=gear,gearPark=gear==VehicleGear.GEAR_PARK,forward=gear==VehicleGear.GEAR_DRIVE,uxRestricted=restricted) }
                     status("주차 상태", "gear=$gear · UX 제한=$restricted")
-                }.onFailure { updateState { it.copy(gearCode=null,gearPark=null,forward=null,uxRestricted=null) }; status("주차 상태", "미확인 · ${it.javaClass.simpleName}") }
+                }.onFailure { state.update { it.copy(gearCode=null,gearPark=null,forward=null,uxRestricted=null) }; status("주차 상태", "미확인 · ${it.javaClass.simpleName}") }
             }
             if(naviReady) runCatching { navi?.getDestinationInfo() }
             vehicle?.let { v ->
@@ -671,40 +563,40 @@ class PleosConnection(private val context: Context) {
                                 // This emulator omits an extinguished telltale from successful reads.
                                 val warningOff = warning == TelltaleState.OFF ||
                                     (info != null && warning == null && observedSeatBeltTelltale)
-                                updateState { it.copy(beltWarningOffAt = if (warningOff) receivedAt else null,
+                                state.update { it.copy(beltWarningOffAt = if (warningOff) receivedAt else null,
                                     beltWarningOnAt = if (warning != null && warning != TelltaleState.OFF) receivedAt else null) }
                                 status("벨트 경고등", if (warningOff) "OFF" else warning?.name ?: "미수신")
                             }
                         }, { failure ->
                             withCurrentVehicle(v, epoch) {
-                                updateState { it.copy(beltWarningOffAt = null, beltWarningOnAt = null) }
+                                state.update { it.copy(beltWarningOffAt = null, beltWarningOnAt = null) }
                                 status("벨트 경고등", failure.javaClass.simpleName)
                             }
                         })
-                    }.onFailure { withCurrentVehicle(v, epoch) { updateState { it.copy(beltWarningOffAt = null, beltWarningOnAt = null) } } }
+                    }.onFailure { withCurrentVehicle(v, epoch) { state.update { it.copy(beltWarningOffAt = null, beltWarningOnAt = null) } } }
                 }
                 if(brakeReady) runCatching { v.getBrake().getCurrentBrakePedalStatus({ b ->
                     val receivedAt = SystemClock.elapsedRealtime()
-                    main.post { if(active && vehicle===v) updateState { it.copy(brake=b,brakeAt=receivedAt) } }
-                }, { main.post { if(active && vehicle===v) updateState { it.copy(brake=null,brakeAt=0) } } }) }
+                    main.post { if(active && vehicle===v) state.update { it.copy(brake=b,brakeAt=receivedAt) } }
+                }, { main.post { if(active && vehicle===v) state.update { it.copy(brake=null,brakeAt=0) } } }) }
                 if(odoReady) runCatching { v.getOdometer().getCurrentDistanceDriven({ d ->
                     val receivedAt = SystemClock.elapsedRealtime()
                     withCurrentVehicle(v, epoch) {
-                        updateState { it.copy(odometer=d,odometerAt=receivedAt) }
+                        state.update { it.copy(odometer=d,odometerAt=receivedAt) }
                         status("Odometer","$d · 원시값")
                     }
                 }, { status("Odometer",it.javaClass.simpleName) }) }
-                driverSeat?.let { area -> readSeat(v, epoch, "driver-belt",
-                    { ok, fail -> seatReader.readBuckle(area, ok, fail) }) { value, at ->
-                    updateState { it.copy(belt=value, beltAt=at) }
-                } }
-                passengerSeat?.let { area -> readSeat(v, epoch, "passenger-belt",
-                    { ok, fail -> seatReader.readBuckle(area, ok, fail) }) { value, at ->
-                    updateState { it.copy(passengerBelt=value, passengerBeltAt=at) }
-                } }
-                passengerOccupancySeat?.let { area -> readSeat(v, epoch, "passenger-occupancy",
-                    { ok, fail -> seatReader.readOccupancy(area, ok, fail) }) { value, at ->
-                    updateState { it.copy(passengerOccupied=value, passengerOccupiedAt=at) }
+                driverSeat?.let { area -> runCatching {
+                    v.getSeat().getCurrentSeatBeltBuckledState(area, { b ->
+                        val receivedAt = SystemClock.elapsedRealtime()
+                        withCurrentVehicle(v, epoch) {
+                            state.update { it.copy(belt=b,beltAt=receivedAt) }
+                            status("Seat",when(b) { true -> "버클 잠김"; false -> "버클 열림"; null -> "미확인" })
+                        }
+                    }, { failure -> withCurrentVehicle(v, epoch) {
+                        state.update { it.copy(belt=null) }
+                        status("Seat",failure.javaClass.simpleName)
+                    } })
                 } }
             }
             main.postDelayed(this,1000)
@@ -714,41 +606,17 @@ class PleosConnection(private val context: Context) {
         override fun run() {
             if(!active)return
             vehicle?.let { v ->
-                val epoch=generation
-                val requestedAt=SystemClock.elapsedRealtime()
-                seatReader.readRaw("HAZARD_LIGHTS_STATE",0,{ raw ->
-                    withCurrentVehicle(v,epoch) {
-                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.hazardAt))
-                            updateState { it.copy(hazardOn=decodeHazard(raw),hazardAt=requestedAt) }
-                    }
-                }, { withCurrentVehicle(v,epoch) {
-                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.hazardAt))
-                        updateState { it.copy(hazardOn=null,hazardAt=requestedAt) }
-                } })
                 if(turnReady) runCatching { v.getTurnSignal().getCurrentTurnSignalState({ t ->
-                    withCurrentVehicle(v,epoch) {
-                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.turnAt))
-                            updateState { it.copy(turnSignal=t?.name,turnAt=requestedAt) }
-                    }
-                }, { withCurrentVehicle(v,epoch) {
-                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.turnAt))
-                        updateState { it.copy(turnSignal=null,turnAt=requestedAt) }
-                } }) }
+                    if(active && vehicle===v)state.update { it.copy(turnSignal=t?.name,turnAt=SystemClock.elapsedRealtime()) }
+                }, { if(vehicle===v)state.update { it.copy(turnSignal=null) } }) }
                 if(steeringReady) runCatching { v.getSteeringWheel().getCurrentSteeringWheelAngle({ angle ->
-                    withCurrentVehicle(v,epoch) {
-                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.steeringAt))
-                            updateState { it.copy(steeringDeg=angle?.toDouble(),steeringAt=requestedAt) }
-                    }
-                }, { withCurrentVehicle(v,epoch) {
-                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.steeringAt))
-                        updateState { it.copy(steeringDeg=null,steeringAt=requestedAt) }
-                } }) }
+                    if(active && vehicle===v)state.update { it.copy(steeringDeg=angle?.toDouble(),steeringAt=SystemClock.elapsedRealtime()) }
+                }, { if(vehicle===v)state.update { it.copy(steeringDeg=null) } }) }
             }
             main.postDelayed(this,250)
         }
     }
     fun stop() {
-        seatReader.stop()
         active=false; main.removeCallbacks(poll);main.removeCallbacks(turnPoll);runCatching { locations.removeUpdates(locationListener) }; naviReady=false
         generation++
         unsubscribeSpeed()

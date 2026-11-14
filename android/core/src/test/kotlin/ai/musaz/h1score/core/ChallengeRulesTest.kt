@@ -74,25 +74,13 @@ class ChallengeRulesTest {
         assertFalse(ledger.spend(80))
         assertEquals(0, ledger.balance)
     }
-    @Test fun `only one game is paid per day regardless of destination`() {
+    @Test fun `same destination is paid once per day and daily limit is two`() {
         val ledger = MileageLedger()
         assertEquals(100, ledger.credit("1",100,"a","2026-11-05"))
         assertEquals(0, ledger.credit("2",100,"a","2026-11-05"))
-        assertEquals(0, ledger.credit("3",60,"b","2026-11-05"))
+        assertEquals(60, ledger.credit("3",60,"b","2026-11-05"))
         assertEquals(0, ledger.credit("4",100,"c","2026-11-05"))
         assertEquals(100, ledger.credit("5",100,"a","2026-11-06"))
-    }
-
-    @Test fun `badge mileage is independent of daily placement limits and can only be credited once`() {
-        val ledger = MileageLedger()
-        assertEquals(100, ledger.credit("drive-a", 100, "a", "2026-11-05"))
-        assertEquals(0, ledger.credit("drive-b", 60, "b", "2026-11-05"))
-        assertEquals(50, ledger.creditBadge("spot-seoul", 50))
-        assertEquals(0, ledger.credit("drive-c", 100, "c", "2026-11-05"))
-
-        val restored = MileageLedger(ledger.balance, ledger.settlementIds, ledger.dailyKeys)
-        assertEquals(0, restored.creditBadge("spot-seoul", 50))
-        assertEquals(150, restored.balance)
     }
     @Test fun `missing intervals reduce coverage and invalidate ranking`() {
         val report=ScoreEngine.evaluate((0..10).map { Sample(it * 100L, 20.0, 80) } + Sample(20000, 20.0, 80))

@@ -21,12 +21,5 @@ internal object H1Style {
         secondary=Ink,onSecondary=Color.White,secondaryContainer=PaleMint,onSecondaryContainer=Ink,
         tertiary=Ink,onTertiary=Color.White,tertiaryContainer=PaleMint,onTertiaryContainer=Ink,
         background=Paper,onBackground=Ink,surface=Color.White,onSurface=Ink,
-        // Set every surface role: unspecified Material defaults carry a lavender tint.
-        surfaceVariant=Paper,onSurfaceVariant=Muted,surfaceTint=Color.Transparent,
-        surfaceBright=Color.White,surfaceDim=Color(0xFFE1E5E9),
-        surfaceContainerLowest=Color.White,surfaceContainerLow=Color(0xFFFAFBFC),
-        surfaceContainer=Color.White,surfaceContainerHigh=Color.White,
-        surfaceContainerHighest=Color(0xFFF0F2F4),
-        outline=Muted,outlineVariant=Line,inverseSurface=Ink,inverseOnSurface=Color.White,inversePrimary=Mint,
     )
 }
