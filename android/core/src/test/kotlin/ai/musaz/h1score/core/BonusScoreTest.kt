@@ -60,28 +60,15 @@ class BonusScoreTest {
         assertEquals(6.25/1000*2.5,r.speedPoints,1e-8)
         assertEquals(0.0,r.accelerationPoints)
     }
-    @Test fun confirmedBeltViolationIsPermanentDisqualification() {
+    @Test fun removedBeltIsPermanentDisqualification() {
         val session=ChallengeSession("belt","poi",14000.0).accept(true).update(10000.0,false,false)
-        val disqualified=session.enforceBelt(BeltDecision(BeltVerdict.DISQUALIFIED, BeltSeat.DRIVER))
+        val disqualified=session.enforceBelt(false)
         assertEquals(Phase.DISQUALIFIED,disqualified.phase)
-        assertEquals(Phase.DISQUALIFIED,disqualified.enforceBelt(BeltDecision(BeltVerdict.SAFE)).update(0.0,true,true).phase)
+        assertEquals(Phase.DISQUALIFIED,disqualified.enforceBelt(true).update(0.0,true,true).phase)
     }
-    @Test fun onlyConfirmedViolationDisqualifiesAnActiveSession() {
-        for (phase in listOf(Phase.RESERVED, Phase.RECORDING, Phase.AWAITING_PARK)) {
-            val session=ChallengeSession("belt","poi",14000.0, phase)
-            for (verdict in listOf(BeltVerdict.SAFE, BeltVerdict.PENDING, BeltVerdict.UNVERIFIABLE)) {
-                assertEquals(session,session.enforceBelt(BeltDecision(verdict, hadUnverifiedMotion = true)))
-            }
-            assertEquals(Phase.DISQUALIFIED,
-                session.enforceBelt(BeltDecision(BeltVerdict.DISQUALIFIED, BeltSeat.PASSENGER)).phase)
-        }
-    }
-    @Test fun beltDecisionsCannotChangeIdleOrTerminalSessions() {
-        for (phase in listOf(Phase.IDLE, Phase.FINISHED, Phase.CANCELLED, Phase.DISQUALIFIED)) {
-            val session=ChallengeSession("belt","poi",14000.0, phase)
-            for (verdict in BeltVerdict.entries) {
-                assertEquals(session,session.enforceBelt(BeltDecision(verdict)))
-            }
-        }
+    @Test fun unknownBeltIsNotAnUnbuckledReading() {
+        val session=ChallengeSession("belt","poi",14000.0).accept(true)
+        assertEquals(Phase.RESERVED,session.enforceBelt(null).phase)
+        assertEquals(Phase.DISQUALIFIED,session.enforceBelt(false).phase)
     }
 }

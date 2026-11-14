@@ -5,37 +5,21 @@ import ai.musaz.h1score.core.*
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal enum class DriveOutcome(val label: String) {
-    COMPLETED("완료"), DISQUALIFIED("실격"), UNVERIFIABLE("확인 불가"),
-}
-
-internal enum class BeltFailureReason(val label: String) {
-    DRIVER_UNBUCKLED("운전석 안전벨트 미착용"),
-    PASSENGER_UNBUCKLED("조수석 안전벨트 미착용"),
-    TELEMETRY_UNAVAILABLE("안전벨트·주행 데이터 확인 불가"),
-}
-
 internal data class CompletedDrive(
     val session: ChallengeSession, val report: ScoreReport, val name: String,
     val demo: Boolean, val ranking: List<RankedEntry>, val earned: Int, val missedDeadline: Boolean,
     val completedAtEpochMs: Long? = null,
     val scoringVersion: String = report.scoringVersion,
-    val badgeMileage: Int = 0,
-    val outcome: DriveOutcome = DriveOutcome.COMPLETED,
-    val beltFailureReason: BeltFailureReason? = null,
-    val participationDay: String? = null,
-    val recognition: ResultRecognition = ResultRecognition.LEGACY,
-    val awardedBadges: List<BadgeAward> = emptyList(),
 )
 
 internal class CompletedDriveStore(private val prefs: SharedPreferences) {
-    fun save(value: CompletedDrive, editor: SharedPreferences.Editor = prefs.edit()) = synchronized(lock) {
+    fun save(value: CompletedDrive) = synchronized(lock) {
         val existing = readAllLocked()
         val previous = existing.firstOrNull { it.session.id == value.session.id }
         val saved = value.copy(completedAtEpochMs = value.completedAtEpochMs ?: previous?.completedAtEpochMs)
         val records = newestFirst(listOf(saved) + existing.filterNot { it.session.id == saved.session.id })
         // One synchronous edit keeps the history and notification's latest result together.
-        editor
+        prefs.edit()
             .putString(HISTORY_KEY, encodeList(records).toString())
             .putString(LATEST_KEY, encode(saved).toString())
             .commit()
@@ -88,13 +72,6 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             put("id", s.id); put("destinationId", s.destinationId); put("initialDistanceM", s.initialDistanceM)
             put("venueId", s.venueId); put("competitionId", s.competitionId)
             put("name", value.name); put("demo", value.demo); put("earned", value.earned); put("missedDeadline", value.missedDeadline)
-            put("badgeMileage", value.badgeMileage)
-            put("participationDay", value.participationDay)
-            put("recognition", value.recognition.name)
-            put("awardedBadges", JSONArray().apply { value.awardedBadges.forEach { award -> put(JSONObject().apply {
-                put("id", award.id); put("title", award.title); put("description", award.description); put("mileage", award.mileage)
-            }) } })
-            put("outcome", value.outcome.name); put("beltFailureReason", value.beltFailureReason?.name)
             put("completedAtEpochMs", value.completedAtEpochMs); put("scoringVersion", value.scoringVersion)
             put("score", r.score); put("compliance", r.compliance); put("smoothness", r.smoothness)
             put("distance", r.validDistanceM); put("coverage", r.coverage); put("valid", r.valid)
@@ -117,10 +94,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 put("turns", JSONArray().apply { r.turns.forEach { turn -> put(JSONObject().apply {
                     put("startedAtMs", turn.startedAtMs); put("endedAtMs", turn.endedAtMs)
                     put("direction", turn.direction.name); put("verdict", turn.verdict.name)
-                    put("kind",turn.kind.name);put("reason",turn.reason.name)
-                    put("observedSignal",turn.observedSignal?.name)
                 }) } })
-                put("turnDiagnostics",JSONObject().apply { r.turnDiagnostics.forEach{(reason,count)->put(reason.name,count)} })
                 put("longitudinalEvents", JSONArray().apply { r.longitudinalEvents.forEach { event -> put(JSONObject().apply {
                     put("kind", event.kind.name); put("startedAtNanos", event.startedAtNanos)
                     put("endedAtNanos", event.endedAtNanos); put("peakAccelerationMps2", event.peakAccelerationMps2)
@@ -140,12 +114,9 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
         val rows = j.getJSONArray("ranking")
         val events = j.optJSONArray("events")
         val version = j.optString("scoringVersion", LEGACY_SCORING_VERSION)
-        val outcome = DriveOutcome.entries.firstOrNull { it.name == j.optString("outcome") }
-            ?: if (j.has("outcome")) DriveOutcome.UNVERIFIABLE else DriveOutcome.COMPLETED
         CompletedDrive(
             session = ChallengeSession(
-                j.getString("id"), j.getString("destinationId"), j.getDouble("initialDistanceM"),
-                if (outcome == DriveOutcome.DISQUALIFIED) Phase.DISQUALIFIED else Phase.FINISHED,
+                j.getString("id"), j.getString("destinationId"), j.getDouble("initialDistanceM"), Phase.FINISHED,
                 venueId = j.optString("venueId").takeIf { it.isNotEmpty() },
                 competitionId = j.optString("competitionId").takeIf { it.isNotEmpty() },
             ),
@@ -171,10 +142,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 brakingEvents = j.optInt("brakingEvents", 0),
                 turns = j.optJSONArray("turns").objects().map { turn ->
                     TurnEvent(turn.getLong("startedAtMs"), turn.getLong("endedAtMs"),
-                        TurnDirection.valueOf(turn.getString("direction")), TurnVerdict.valueOf(turn.getString("verdict")),
-                        runCatching{ManeuverKind.valueOf(turn.optString("kind"))}.getOrDefault(ManeuverKind.TURN),
-                        runCatching{TurnReason.valueOf(turn.optString("reason"))}.getOrDefault(TurnReason.NONE),
-                        runCatching{TurnVerdict.valueOf(turn.optString("observedSignal"))}.getOrNull())
+                        TurnDirection.valueOf(turn.getString("direction")), TurnVerdict.valueOf(turn.getString("verdict")))
                 },
                 longitudinalEvents = j.optJSONArray("longitudinalEvents").objects().map { event ->
                     LongitudinalEvent(LongitudinalKind.valueOf(event.getString("kind")),
@@ -188,9 +156,6 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 longitudinalReady = j.optBoolean("longitudinalReady", false),
                 longitudinalSampleRateHz = j.optDouble("longitudinalSampleRateHz", 0.0),
                 scoringVersion = version,
-                turnDiagnostics = TurnReason.entries.mapNotNull{reason->
-                    j.optJSONObject("turnDiagnostics")?.optInt(reason.name,0)?.takeIf{it>0}?.let{reason to it}
-                }.toMap(),
             ),
             name = j.getString("name"),
             demo = j.getBoolean("demo"),
@@ -201,14 +166,6 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             missedDeadline = j.getBoolean("missedDeadline"),
             completedAtEpochMs = if (j.has("completedAtEpochMs") && !j.isNull("completedAtEpochMs")) j.getLong("completedAtEpochMs") else null,
             scoringVersion = version,
-            badgeMileage = j.optInt("badgeMileage"),
-            outcome = outcome,
-            beltFailureReason = BeltFailureReason.entries.firstOrNull { it.name == j.optString("beltFailureReason") },
-            participationDay = j.optString("participationDay").takeIf { it.isNotBlank() && it != "null" },
-            recognition = ResultRecognition.entries.firstOrNull { it.name == j.optString("recognition") } ?: ResultRecognition.LEGACY,
-            awardedBadges = j.optJSONArray("awardedBadges").objects().map {
-                BadgeAward(it.getString("id"), it.getString("title"), it.getString("description"), it.getInt("mileage"))
-            },
         )
     }.getOrNull()
 

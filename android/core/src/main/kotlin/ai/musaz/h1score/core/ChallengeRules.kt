@@ -26,9 +26,8 @@ data class ChallengeSession(
             return copy(phase = Phase.RECORDING, startCount = startCount + 1)
         return this
     }
-    fun enforceBelt(decision: BeltDecision): ChallengeSession =
-        if (decision.verdict == BeltVerdict.DISQUALIFIED &&
-            phase in listOf(Phase.RESERVED, Phase.RECORDING, Phase.AWAITING_PARK))
+    fun enforceBelt(buckled: Boolean?): ChallengeSession =
+        if (buckled == false && phase in listOf(Phase.RESERVED, Phase.RECORDING))
             copy(phase = Phase.DISQUALIFIED) else this
     fun changeDestination(next: String) = if (next != destinationId) copy(phase = Phase.CANCELLED) else this
 }
@@ -65,7 +64,6 @@ data class ScoreReport(
     val longitudinalReady: Boolean = false,
     val longitudinalSampleRateHz: Double = 0.0,
     val scoringVersion: String = LEGACY_SCORING_VERSION,
-    val turnDiagnostics: Map<TurnReason,Int> = emptyMap(),
 ) {
     // Braking is metadata on a deceleration event, never a second scored event.
     val decelerationEvents get() = brakingEvents
@@ -78,7 +76,7 @@ const val LEGACY_SCORING_VERSION = "speed70-accel30-v1"
 
 /** Prototype distance bonuses; only confirmed longitudinal events exclude smooth bonus. */
 object ScoreEngine {
-    const val VERSION = "distance-bonus-longitudinal-v2-turn-v2"
+    const val VERSION = "distance-bonus-longitudinal-v2-turn-v1"
     const val START_POINTS = 60.0
     const val SPEED_PER_KM = 2.5
     const val ACCELERATION_PER_KM = 1.5
@@ -340,19 +338,12 @@ class MileageLedger(initialBalance: Int = 0, initialIds: Set<String> = emptySet(
         balance -= cost
         return true
     }
-    fun creditBadge(id: String, miles: Int): Int {
-        require(miles > 0)
-        if (!settled.add("badge:$id")) return 0
-        balance += miles
-        return miles
-    }
-
     fun credit(id: String, miles: Int, destination: String = id, date: String = "demo"): Int {
         require(miles >= 0)
         if (!settled.add(id)) return 0
         if(miles == 0) return 0
         val key="$date|$destination"
-        if(daily.any { it.startsWith("$date|") }) return 0
+        if(key in daily || daily.count { it.startsWith("$date|") } >=2) return 0
         daily.add(key)
         balance += miles
         return miles

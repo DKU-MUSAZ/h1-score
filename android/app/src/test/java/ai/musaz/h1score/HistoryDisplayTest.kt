@@ -8,22 +8,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 
 class HistoryDisplayTest {
-    @Test fun afterMidnightArrivalIsShownOnItsParticipationDayInBothCalendars() {
-        val saved=drive("overnight",time("2026-11-15T15:10:00Z")).copy(participationDay="2026-11-15")
-        assertEquals(listOf(saved),historyForDay(listOf(saved),LocalDate.of(2026,11,15)))
-        assertEquals(emptyList<CompletedDrive>(),historyForDay(listOf(saved),LocalDate.of(2026,11,16)))
-        assertEquals(listOf(saved),historyForWeek(listOf(saved),LocalDate.of(2026,11,9)))
-    }
-    @Test fun weekIncludesOnlyMondayThroughSundayInKoreanTime() {
-        val before = drive("before", time("2026-12-27T14:59:59Z"))
-        val first = drive("monday", time("2026-12-27T15:00:00Z"))
-        val last = drive("sunday", time("2027-01-03T14:59:59Z"))
-        val after = drive("after", time("2027-01-03T15:00:00Z"))
-        val unknown = drive("unknown", null)
-        assertEquals(listOf(first, last), historyForWeek(listOf(before, first, last, after, unknown), LocalDate.of(2026, 12, 28)))
-    }
     @Test fun dateLabelUsesKoreanTimeAcrossMidnight() {
         assertEquals("주행일 2026.11.10 23:59", historyDateLabel(time("2026-11-10T14:59:00Z")))
         assertEquals("주행일 2026.11.11 00:00", historyDateLabel(time("2026-11-10T15:00:00Z")))
@@ -75,22 +62,37 @@ class HistoryDisplayTest {
         assertNull(historyDate(null))
     }
 
-    @Test fun initialWeekUsesLatestDatedRecordOrKoreanToday() {
+    @Test fun initialMonthUsesLatestDatedRecordOrKoreanToday() {
         val old = drive("old", time("2025-12-31T14:59:00Z"))
         val latest = drive("latest", time("2025-12-31T15:00:00Z"))
         val unknown = drive("unknown", null)
         val today = LocalDate.of(2026, 11, 11)
 
-        assertEquals(LocalDate.of(2025, 12, 29), initialHistoryWeek(listOf(unknown, latest, old), today))
-        assertEquals(LocalDate.of(2026, 11, 9), initialHistoryWeek(listOf(unknown), today))
-        assertEquals(LocalDate.of(2026, 11, 9), initialHistoryWeek(emptyList(), today))
+        assertEquals(YearMonth.of(2026, 1), initialHistoryMonth(listOf(unknown, latest, old), today))
+        assertEquals(YearMonth.of(2026, 11), initialHistoryMonth(listOf(unknown), today))
+        assertEquals(YearMonth.of(2026, 11), initialHistoryMonth(emptyList(), today))
     }
 
-    @Test fun weeksStartOnMondayAcrossLeapMonthAndYearBoundary() {
-        assertEquals(LocalDate.of(2024, 2, 26), historyWeekStart(LocalDate.of(2024, 2, 29)))
-        assertEquals(LocalDate.of(2024, 2, 26), historyWeekStart(LocalDate.of(2024, 3, 3)))
-        assertEquals(LocalDate.of(2026, 12, 28), historyWeekStart(LocalDate.of(2027, 1, 1)))
-        assertEquals(LocalDate.of(2027, 1, 4), historyWeekStart(LocalDate.of(2027, 1, 4)))
+    @Test fun calendarUsesSundayColumnsAcrossLeapMonthAndYearBoundary() {
+        val leapFebruary = historyCalendarDays(YearMonth.of(2024, 2))
+        assertEquals(42, leapFebruary.size)
+        assertEquals(listOf(null, null, null, null), leapFebruary.take(4))
+        assertEquals(LocalDate.of(2024, 2, 1), leapFebruary[4])
+        assertEquals(LocalDate.of(2024, 2, 29), leapFebruary[32])
+        assertEquals(29, leapFebruary.filterNotNull().size)
+        assertEquals(List<LocalDate?>(9) { null }, leapFebruary.drop(33))
+
+        val february = historyCalendarDays(YearMonth.of(2026, 2))
+        assertEquals(LocalDate.of(2026, 2, 1), february.first())
+        assertEquals(LocalDate.of(2026, 2, 28), february[27])
+        assertEquals(28, february.filterNotNull().size)
+
+        val december = YearMonth.of(2026, 12)
+        assertEquals(LocalDate.of(2026, 12, 31), historyCalendarDays(december)[32])
+        val january = historyCalendarDays(december.plusMonths(1))
+        assertEquals(42, january.size)
+        assertEquals(LocalDate.of(2027, 1, 1), january[5])
+        assertEquals(LocalDate.of(2027, 1, 31), january[35])
     }
 
     private fun time(iso: String) = Instant.parse(iso).toEpochMilli()

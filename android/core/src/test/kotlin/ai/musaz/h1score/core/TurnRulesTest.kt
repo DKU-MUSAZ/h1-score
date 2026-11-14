@@ -19,55 +19,6 @@ class TurnRulesTest {
             assertEquals(dir,event.direction);assertEquals(TurnVerdict.UNUSED,event.verdict);assertEquals(1.0,event.penalty) }
     }
     @Test fun oppositeIsTwoPoints() { assertEquals(2.0,detect(route(signal=SignalState.RIGHT)).single().penalty) }
-    @Test fun lateCorrectSignalCannotEraseMissingAdvanceSignal() {
-        val event=detect(route().map { if(it.atMs>=4000) it.copy(signal=SignalState.LEFT) else it }).single()
-        assertEquals(1.0,event.penalty)
-    }
-    @Test fun correctingOppositeSignalDuringTurnDoesNotErasePenalty() {
-        val event=detect(route(signal=SignalState.RIGHT).map {
-            if(it.atMs>=4000) it.copy(signal=SignalState.LEFT) else it }).single()
-        assertEquals(2.0,event.penalty)
-    }
-    @Test fun oneBriefCorrectSampleIsNotAdvanceSignalling() {
-        val event=detect(route().map { if(it.atMs==2750L) it.copy(signal=SignalState.LEFT) else it }).single()
-        assertEquals(1.0,event.penalty)
-    }
-    @Test fun briefOppositeSampleIsNotEnoughForTwoPointPenalty() {
-        val event=detect(route().map{if(it.atMs==2750L)it.copy(signal=SignalState.RIGHT) else it}).single()
-        assertTrue(event.penalty<2.0)
-    }
-    @Test fun insufficientAdvanceHistoryCannotProveLateActivation() {
-        val event=detect(route(signal=SignalState.LEFT).drop(11)).single()
-        assertEquals(TurnVerdict.UNVERIFIABLE,event.verdict)
-        assertEquals(0.0,event.penalty)
-    }
-    @Test fun continuouslyCorrectSignalWithPollingJitterIsNotLate() {
-        val times=(0L..2500L step 250).toList()+listOf(3004L,3512L,3765L)
-        val observations=times.map { t->route(TurnDirection.RIGHT,SignalState.RIGHT).first().copy(
-            atMs=t,signalAtMs=t,steeringAtMs=t) }
-        assertEquals(TurnVerdict.MATCHED,signalVerdict(observations,3512,TurnDirection.RIGHT))
-    }
-    @Test fun signalObservationGapBeyondFreshnessWindowMustHoldJudgment() {
-        val observations=listOf(0L,250L,500L,1500L,1750L,2000L).map { t->
-            route(signal=SignalState.LEFT).first().copy(atMs=t,signalAtMs=t,steeringAtMs=t) }
-        assertEquals(TurnVerdict.UNVERIFIABLE,signalVerdict(observations,1750,TurnDirection.LEFT))
-    }
-    @Test fun gpsTeleportCannotConfirmTurn() {
-        val events=detect(route().map{if(it.atMs==4000L)it.copy(gps=it.gps!!.copy(latitude=38.0))else it})
-        assertTrue(events.none{it.penalty>0})
-    }
-    @Test fun hazardUnknownAndStaleSignalCannotDeduct() {
-        assertTrue(detect(route().map{it.copy(hazardOn=null)}).none{it.penalty>0})
-        assertTrue(detect(route().map{it.copy(hazardOn=true)}).none{it.penalty>0})
-        assertTrue(detect(route().map{it.copy(signalAtMs=it.atMs-800)}).none{it.penalty>0})
-    }
-    @Test fun repeatedCachedSteeringCannotProveDuration() {
-        assertTrue(detect(route().map{if(it.atMs>=3000)it.copy(steeringAtMs=3000)else it}).none{it.penalty>0})
-    }
-    @Test fun steeringWheelAnglesAboveSixtyStillAllowTurns() {
-        val event=detect(route().map { it.copy(steeringDeg=it.steeringDeg!!*12) }).single()
-        assertEquals(1.0,event.penalty)
-    }
     @Test fun correctSignalBeforeTurnMayAutoCancelDuringTurn() {
         val input=route().map { if(it.atMs in 1500..2750)it.copy(signal=SignalState.LEFT) else it }
         assertEquals(TurnVerdict.MATCHED,detect(input).single().verdict)
@@ -88,7 +39,7 @@ class TurnRulesTest {
         assertTrue(detect(route().map { it.copy(instruction=null) }).isEmpty())
     }
     @Test fun staleOrFarInstructionDoesNotDeduct() {
-        assertTrue(detect(route().map { it.copy(instructionAtMs=it.atMs-11000) }).isEmpty())
+        assertTrue(detect(route().map { it.copy(instructionAtMs=it.atMs-4000) }).isEmpty())
         assertTrue(detect(route().map { it.copy(instructionDistanceM=100.0) }).isEmpty())
     }
     @Test fun steeringWithoutGpsTurnIsNotEnough() {

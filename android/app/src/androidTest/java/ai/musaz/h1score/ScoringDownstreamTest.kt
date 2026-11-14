@@ -2,7 +2,6 @@ package ai.musaz.h1score
 
 import ai.musaz.h1score.core.*
 import android.app.Application
-import android.car.VehicleGear
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -154,25 +153,15 @@ class ScoringDownstreamTest {
             val beforeDisqualification = CompletedDriveStore(app.prefs).readAll()
             val disqualified = beginLiveTrip(vm)
             val now = SystemClock.elapsedRealtime()
-            val moving = disqualified.route.copy(belt = false, beltAt = now, speedAt = now,
-                gearCode = VehicleGear.GEAR_DRIVE, gearAt = now, gearPark = false,
-                motionSpeedMps = 1.0, motionSpeedAt = now, passengerOccupied = false, passengerOccupiedAt = now)
-            vm.receiveVehicle(moving, now)
-            assertEquals(Phase.RECORDING, vm.phase)
-            vm.receiveVehicle(moving.copy(beltAt = now + 500, motionSpeedAt = now + 500,
-                gearAt = now + 500, passengerOccupiedAt = now + 500), now + 500)
+            vm.receiveVehicle(disqualified.route.copy(belt = false, beltAt = now, speedAt = now), now)
             assertEquals(Phase.DISQUALIFIED, vm.phase)
-            assertNull(vm.report!!.score)
-            assertFalse(vm.report!!.valid)
+            assertNull(vm.report)
             assertTrue(vm.ranking.isEmpty())
             assertTrue(vm.pendingBadges.isEmpty())
             // Re-buckling and an arrival event cannot restore the disqualified session.
             arrive(vm, disqualified)
             assertEquals(Phase.DISQUALIFIED, vm.phase)
-            val saved = CompletedDriveStore(app.prefs).readAll()
-            assertEquals(beforeDisqualification.size + 1, saved.size)
-            assertTrue(saved.containsAll(beforeDisqualification))
-            assertEquals(DriveOutcome.DISQUALIFIED, saved.single { it.session.id == vm.session!!.id }.outcome)
+            assertEquals(beforeDisqualification, CompletedDriveStore(app.prefs).readAll())
             assertEquals(progress, vm.collectionProgress)
             assertEquals(progress, CollectionProgressStore(app.prefs).read(false))
             assertEquals(distance, vm.recordedDistanceMeters)
@@ -188,10 +177,8 @@ class ScoringDownstreamTest {
         // the test runner's weekday. The other day is only an isolated store fixture.
         val referenceDate = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
         val otherDay = if (today.dayOfWeek == DayOfWeek.MONDAY) today.plusDays(1) else today.minusDays(1)
-        val editor = app.prefs.edit()
-        CollectionProgressStore(app.prefs).writeChallenge(editor, false,
+        CollectionProgressStore(app.prefs).saveChallenge(false,
             CollectionProgress().recordChallenge(otherDay, 100).recordChallenge(referenceDate.minusDays(7), 61))
-        editor.commit()
         ui.runOnIdle {
             val vm = model(app)
             assertEquals(95, completeLiveTrip(vm, compliantMeters = 8_750).score)
@@ -210,28 +197,6 @@ class ScoringDownstreamTest {
             assertEquals(98, restored.collectionProgress.weeklyScoreAverage(referenceDate))
             assertEquals(20_000L, restored.recordedDistanceMeters)
             assertEquals(2, restored.collectionProgress.scoreDays(95))
-        }
-    }
-
-    @Test fun liveChallengeCreditsNewBadgesWithoutPlacementMileage() {
-        val app = application()
-        val lastMonday = LocalDate.now(ChallengeRound.seoul).minusWeeks(1).with(DayOfWeek.MONDAY)
-        val previous = CollectionProgress((0L..3L).associate { lastMonday.plusDays(it) to 92 })
-        val editor = app.prefs.edit()
-        CollectionProgressStore(app.prefs).writeChallenge(editor, false, previous)
-        editor.commit()
-
-        ui.runOnIdle {
-            val vm = model(app)
-            assertEquals(95, completeLiveTrip(vm, compliantMeters = 8_750).score)
-            assertEquals(0, vm.earned)
-            assertEquals(40, vm.badgeMileageEarned)
-            assertEquals(40, vm.balance)
-            assertEquals(40, CompletedDriveStore(app.prefs).read()?.badgeMileage)
-
-            assertEquals(80, completeLiveTrip(vm, compliantMeters = 5_000).score)
-            assertEquals(0, vm.badgeMileageEarned)
-            assertEquals(40, model(app).balance)
         }
     }
 
@@ -304,7 +269,7 @@ class ScoringDownstreamTest {
             }
             H1App(restored)
         }
-        ui.onNodeWithText("+100M").assertIsDisplayed(); ui.onNodeWithText("적립 마일리지").assertIsDisplayed()
+        ui.onNodeWithText("이번 적립 +100M", substring = true).assertIsDisplayed()
         ui.runOnIdle { restored.navigate(Screen.WALLET) }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
         ui.onNodeWithText("100", useUnmergedTree = true).assertIsDisplayed()
@@ -371,8 +336,7 @@ class ScoringDownstreamTest {
         assertEquals(Phase.RESERVED, vm.phase)
         val startedAt = SystemClock.elapsedRealtime()
         val recording = route.copy(remainingM = 10_000.0, destinationAt = startedAt,
-            speedAt = startedAt, beltAt = startedAt, gearAt = startedAt,
-            motionSpeedAt = startedAt, passengerOccupiedAt = startedAt)
+            speedAt = startedAt, beltAt = startedAt)
         vm.receiveVehicle(recording, startedAt)
         assertEquals(Phase.RECORDING, vm.phase)
         return Recording(recording, startedAt, round)
@@ -394,16 +358,13 @@ class ScoringDownstreamTest {
     private fun arrive(vm: ChallengeViewModel, recording: Recording, arrival: Instant = Instant.now()) {
         val now = SystemClock.elapsedRealtime()
         vm.receiveVehicle(recording.route.copy(arrived = true, arrivedAt = arrival, remainingM = 0.0,
-            speedMps = 0.0, speedAt = now, gearPark = true, belt = true, beltAt = now,
-            gearCode = VehicleGear.GEAR_PARK, gearAt = now, motionSpeedMps = 0.0, motionSpeedAt = now,
-            passengerOccupied = false, passengerOccupiedAt = now), now)
+            speedMps = 0.0, speedAt = now, gearPark = true, belt = true, beltAt = now), now)
     }
 
     private fun parked(): LiveVehicle {
         val now = SystemClock.elapsedRealtime()
         return LiveVehicle(speedMps = 0.0, speedAt = now, gearPark = true, uxRestricted = false,
-            belt = true, beltAt = now, gearCode = VehicleGear.GEAR_PARK, gearAt = now,
-            motionSpeedMps = 0.0, motionSpeedAt = now, passengerOccupied = false, passengerOccupiedAt = now)
+            belt = true, beltAt = now)
     }
 
     private fun legacyDrive() = CompletedDrive(

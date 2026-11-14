@@ -1,7 +1,6 @@
 package ai.musaz.h1score
 
 import android.app.Application
-import android.content.SharedPreferences
 import android.os.SystemClock
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
@@ -12,7 +11,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
-import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToLong
 import org.json.JSONArray
@@ -35,9 +33,7 @@ private const val HomeShortcutKey = "destination-shortcut-home"
 private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
 
-class ChallengeViewModel @JvmOverloads constructor(app: Application,
-    preferenceName: String = "h1-demo-v1", private val clock: () -> Instant = { Instant.now() },
-): AndroidViewModel(app) {
+class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val connection = PleosConnection(app)
     var live by mutableStateOf(LiveVehicle()); private set
     var demo by mutableStateOf(false); private set
@@ -58,19 +54,11 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     var report by mutableStateOf<ScoreReport?>(null); private set
     var ranking by mutableStateOf<List<RankedEntry>>(emptyList()); private set
     var earned by mutableIntStateOf(0); private set
-    internal var badgeMileageEarned by mutableIntStateOf(0); private set
     var notice by mutableStateOf<String?>(null)
     var completed by mutableIntStateOf(0); private set
-    private val prefs = app.getSharedPreferences(preferenceName,0)
+    private val prefs = app.getSharedPreferences("h1-demo-v1",0)
     private val completedDriveStore = CompletedDriveStore(prefs)
-    private val participationStore = DailyParticipationStore(prefs)
     internal var completedDrives by mutableStateOf(completedDriveStore.readAll()); private set
-    private val historyExamples by lazy { demoHistoryExamples() }
-    internal val historyDrives get(): List<CompletedDrive> {
-        val records = completedDrives.filter { it.demo == demo }
-        val days = records.mapNotNull(::historyRecordDay).toSet()
-        return if (demo) records + historyExamples.filter { historyRecordDay(it) !in days } else records
-    }
     internal var selectedHistoryRecord by mutableStateOf<CompletedDrive?>(null); private set
     internal var recentDestinations by mutableStateOf(readRecentDestinations())
         private set
@@ -212,19 +200,8 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
 
 
-    private fun driverBeltAllowsEntry(): Boolean {
-        if (demo || live.beltConditionMet) return true
-        notice = "운전석 안전벨트 착용이 확인돼야 챌린지를 시작할 수 있어요."
-        return false
-    }
-
     private fun canJoinRound(round: ChallengeRound): Boolean {
-        if (!driverBeltAllowsEntry()) return false
-        if (!participationStore.available(demo, clock().atZone(ChallengeRound.seoul).toLocalDate())) {
-            notice = "오늘은 이미 참가했어요. 실격·취소를 포함해 하루 한 경기만 참여할 수 있어요. 내일 다시 만나요."
-            return false
-        }
-        if (demo || round.contains(clock())) return true
+        if (demo || round.contains(Instant.now())) return true
         notice = "현재 참가할 수 없는 시간이에요. 다음 회차를 확인해 주세요."
         return false
     }
@@ -246,6 +223,10 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
                     notice = "시연 예약 완료 · 내장 내비 연결이나 P단 상태를 확인해 주세요"
                 }
             }
+            return
+        }
+        if (!live.beltConditionMet) {
+            notice = "운전석 벨트를 착용한 뒤 참가해 주세요"
             return
         }
         if (!beginService()) return
@@ -351,15 +332,7 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
 
     internal fun startSpotVisit(spot: SpotTour) {
-        if (!parked || activeJourney || awaitingMapRoute || !spotRecordingIdle()) return
-        if (demo) {
-            val recordedDays = collectionProgress.visitsBySpot[spot].orEmpty()
-            val today = LocalDate.now(ChallengeRound.seoul)
-            val nextDay = generateSequence(today) { it.minusDays(1) }.first { it !in recordedDays }
-            notice = recordSpotVisit(spot, nextDay)
-            return
-        }
-        if (!beginService()) return
+        if (demo || !parked || activeJourney || awaitingMapRoute || !spotRecordingIdle() || !beginService()) return
         trackedSpot = spot
         spotStartedAt = Instant.now()
         spotRouteId = null
@@ -400,26 +373,19 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         val arrivedAt = vehicle.arrivedAt ?: return
         val startedAt = spotStartedAt ?: return
         if (!matches || route != spotRouteId || arrivedAt < startedAt || !vehicle.parked) return
-        finishSpotVisit(recordSpotVisit(spot, arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()))
-    }
-
-    private fun recordSpotVisit(spot: SpotTour, day: LocalDate): String {
-        val previous = collectionProgress
-        val progress = previous.recordVisit(spot, day)
-        val visits = progress.visits(spot)
-        if (progress == previous) {
-            return if (visits >= SpotTour.REQUIRED_VISITS) "이미 획득한 스팟투어 배지예요"
-                else "오늘 이 스팟의 방문은 이미 기록됐어요"
+        val progress = collectionProgress.recordVisit(spot, arrivedAt.atZone(ChallengeRound.seoul).toLocalDate())
+        val changed = progress != collectionProgress
+        if (changed) {
+            collectionStore.saveVisit(spot, progress)
+            collectionProgress = progress
         }
-        val editor = prefs.edit()
-        collectionStore.writeVisit(editor, demo, spot, progress)
-        val award = creditNewBadges(previous, rankBadgeProgress, progress, rankBadgeProgress).singleOrNull()
-        writeMileage(editor)
-        editor.apply()
-        collectionProgress = progress
-        balance = ledger.balance
-        return if (award != null) "${award.title} 배지를 획득했어요 · +${award.mileage}M"
-            else "${spot.city} 스팟투어 방문을 기록했어요 · $visits / ${SpotTour.REQUIRED_VISITS}회"
+        val visits = progress.visits(spot)
+        finishSpotVisit(when {
+            changed && visits == 3 -> "${spot.city} 스팟투어 배지를 획득했어요"
+            changed -> "${spot.city} 스팟투어 방문을 기록했어요 · $visits / 3회"
+            visits == 3 -> "이미 획득한 스팟투어 배지예요"
+            else -> "오늘 이 스팟의 방문은 이미 기록됐어요"
+        })
     }
 
     private val rankBadgeKey get() = if (demo) "rank-badges-demo" else "rank-badges-live"
@@ -430,96 +396,34 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
     )
 
-    private fun recordRankBadgeProgress(editor: SharedPreferences.Editor, arrivedAt: Instant, rank: Int, participants: Int) {
+    private fun recordRankBadgeProgress(arrivedAt: Instant, rank: Int, participants: Int) {
         val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
         val updated = rankBadgeProgress.record(day, rank, participants, demo)
         if (updated == rankBadgeProgress) return
         val key = rankBadgeKey
-        editor.apply {
+        prefs.edit().apply {
             RankBadgeGoal.entries.forEach { putInt("$key-${it.id}", updated.days(it)) }
             putStringSet("$key-days", updated.countedDays.map { it.toString() }.toSet())
-        }
+        }.apply()
         rankBadgeProgress = updated
     }
     fun chooseDemoDrive(profile: DemoDrive) { if(demo && parked && !activeJourney) demoDrive=profile }
     fun acknowledgeBadge() { if(parked) pendingBadges=pendingBadges.drop(1) }
-    // The original wallet was for demonstration rewards. Keep those entries in the demo wallet.
-    private fun mileageKey(key: String) = if (demo) key else "$key-live"
-    private fun readMileage() = MileageLedger(
-        prefs.getInt(mileageKey("balance"), 0),
-        prefs.getStringSet(mileageKey("settled"), emptySet()).orEmpty(),
-        prefs.getStringSet(mileageKey("daily"), emptySet()).orEmpty(),
-    )
-    private fun readRedeemedRewards() = prefs.getStringSet(mileageKey("redeemed-rewards"), emptySet()).orEmpty().toSet()
-    private var ledger = readMileage()
+    private val ledger = MileageLedger(prefs.getInt("balance", 0),prefs.getStringSet("settled", emptySet()) ?: emptySet(),prefs.getStringSet("daily", emptySet()) ?: emptySet())
     var balance by mutableIntStateOf(ledger.balance); private set
-    var redeemedRewards by mutableStateOf(readRedeemedRewards())
+    var redeemedRewards by mutableStateOf(prefs.getStringSet("redeemed-rewards", emptySet())?.toSet().orEmpty())
         private set
-    var couponNumbers by mutableStateOf(readCouponNumbers())
-        private set
-
-    private fun couponNumberKey(rewardId: String) = mileageKey("coupon-number-$rewardId")
-
-    private fun newCouponNumber(): String {
-        val digits = UUID.randomUUID().toString().replace("-", "").take(12).uppercase(Locale.ROOT)
-        return digits.chunked(4).joinToString("-", prefix = "AJ-")
-    }
-
-    private fun readCouponNumbers(): Map<String, String> {
-        val missing = mutableMapOf<String, String>()
-        val numbers = redeemedRewards.associateWith { rewardId ->
-            val key = couponNumberKey(rewardId)
-            prefs.getString(key, null)?.takeIf { it.isNotBlank() }
-                ?: newCouponNumber().also { missing[key] = it }
-        }
-        if (missing.isNotEmpty()) {
-            val editor = prefs.edit()
-            missing.forEach { (key, number) -> editor.putString(key, number) }
-            editor.apply()
-        }
-        return numbers
-    }
-
-    private fun reloadMileage() {
-        ledger = readMileage()
-        balance = ledger.balance
-        redeemedRewards = readRedeemedRewards()
-        couponNumbers = readCouponNumbers()
-    }
-
-    private fun writeMileage(editor: SharedPreferences.Editor) {
-        editor.putInt(mileageKey("balance"), ledger.balance)
-            .putStringSet(mileageKey("settled"), ledger.settlementIds)
-            .putStringSet(mileageKey("daily"), ledger.dailyKeys)
-    }
-
-    private fun creditNewBadges(
-        previous: CollectionProgress, previousRanks: RankBadgeProgress,
-        progress: CollectionProgress, ranks: RankBadgeProgress,
-    ): List<BadgeAward> = newlyEarnedCollectionBadges(previous, previousRanks, progress, ranks)
-        .filter { ledger.creditBadge(it.id, it.mileage) > 0 }
-
     internal fun redeemDemoReward(reward: MileageReward) {
-        if (!demo || !parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
-        val number = newCouponNumber()
+        if (!parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
         balance = ledger.balance
         redeemedRewards = redeemedRewards + reward.id
-        couponNumbers = couponNumbers + (reward.id to number)
-        prefs.edit().putInt(mileageKey("balance"), balance)
-            .putStringSet(mileageKey("redeemed-rewards"), redeemedRewards)
-            .putString(couponNumberKey(reward.id), number).apply()
+        prefs.edit().putInt("balance", balance).putStringSet("redeemed-rewards", redeemedRewards).apply()
     }
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()
-    private val turnDetector = ManeuverMonitor()
-    private val beltMonitor = SeatBeltMonitor()
-    internal var beltDecision by mutableStateOf(BeltDecision(BeltVerdict.SAFE)); private set
+    private val turnDetector = TurnDetector()
     private var lastTurnAt = 0L
-    private fun currentReport(): ScoreReport {
-        val measured=ScoreEngine.evaluate(samples, turnDetector.events).copy(turnDiagnostics=turnDetector.diagnostics)
-        return if (!demo && !consoleTest && (beltDecision.hadUnverifiedMotion ||
-                beltDecision.verdict != BeltVerdict.SAFE)) measured.copy(score=null, valid=false) else measured
-    }
+    private fun currentReport() = ScoreEngine.evaluate(samples, turnDetector.events)
     private var lastReportAt = 0L
     private var recordingStartedAtNanos: Long? = null
     private var uiVisible = false
@@ -527,24 +431,18 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     val consoleTestAvailable get() = BuildConfig.DEBUG && isEmulator
     val parked get() = if (demo) !demoMoving && (live.parked || (isEmulator && live.gearPark == null && live.uxRestricted != true && (live.speedMps ?: 0.0) < .1)) else live.parked
     private var completedDestinationName: String? = null
-    val destinationName get() = completedDestinationName?.takeIf { phase in listOf(Phase.FINISHED, Phase.DISQUALIFIED) } ?:
+    val destinationName get() = completedDestinationName?.takeIf { phase == Phase.FINISHED } ?:
         if (consoleTest) "콘솔 입력 테스트 · 시험 제한속도 ${consoleSessionLimitKph}km/h"
         else if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
     val distanceKm get() = if(demo) selected.distanceKm else (live.remainingM ?: 0.0)/1000
     val phase get() = session?.phase ?: Phase.IDLE
     val activeJourney get() = phase in listOf(Phase.RESERVED,Phase.RECORDING,Phase.AWAITING_PARK)
-    val resultUnlocked get() = phase in listOf(Phase.FINISHED, Phase.DISQUALIFIED) && parked
+    val resultUnlocked get() = phase == Phase.FINISHED && parked
 
     init {
         viewModelScope.launch { connection.flow.collect { receiveVehicle(it) } }
         // Preserve every source sample; the UI state stream may conflate fast updates.
         viewModelScope.launch { connection.samples.collect { receiveSample(it) } }
-        viewModelScope.launch {
-            while (true) {
-                delay(250)
-                if (!demo && !consoleTest && activeJourney) checkSeatBelts(live, SystemClock.elapsedRealtime())
-            }
-        }
     }
 
     internal fun receiveVehicle(next: LiveVehicle, receivedAt: Long = SystemClock.elapsedRealtime()) {
@@ -596,7 +494,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         demoRunning = false
         demoMoving = false
         demo = false
-        reloadMileage()
         consoleTest = true
         consoleSessionLimitKph = consoleLimitKph
         activeRound = null
@@ -613,7 +510,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         progressReport = ScoreEngine.evaluate(emptyList())
         ranking = emptyList()
         earned = 0
-        badgeMileageEarned = 0
         pendingBadges = emptyList()
         ownedBadges = prefs.getStringSet("badges-live", emptySet())?.toSet() ?: emptySet()
         rankBadgeProgress = readRankBadgeProgress(rankBadgeKey)
@@ -641,7 +537,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         connection.setConsoleCapture(false)
         ranking = emptyList()
         earned = 0
-        badgeMileageEarned = 0
         pendingBadges = emptyList()
         // A console result is diagnostic only: no history, weekly score, badges, or rewards.
         screen = Screen.RESULT
@@ -668,22 +563,17 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     internal fun openCompletedResult() {
         selectedHistoryRecord=null
         if(activeJourney) { screen=Screen.JOURNEY; return }
-        completedDriveStore.read()?.takeIf { it.session.id == session?.id && it.outcome != DriveOutcome.COMPLETED }
-            ?.let { selectedHistoryRecord=it }
         if(report == null || phase != Phase.FINISHED) {
             completedDriveStore.read()?.let { saved ->
                 connection.setConsoleCapture(false)
                 consoleTest=false
                 demo=saved.demo
-                reloadMileage()
                 ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
                 rankBadgeProgress=readRankBadgeProgress(rankBadgeKey)
                 collectionProgress=collectionStore.read(demo)
                 recordedDistanceMeters=prefs.getLong(distanceKey(demo),0)
                 session=saved.session; report=saved.report; ranking=saved.ranking
-                if (saved.outcome != DriveOutcome.COMPLETED) selectedHistoryRecord=saved
                 earned=saved.earned; missedDeadline=saved.missedDeadline
-                badgeMileageEarned = saved.badgeMileage
                 completedDestinationName=saved.name
                 selected=challengeSpots.firstOrNull {it.venueId==saved.session.venueId} ?: selected
             }
@@ -710,7 +600,7 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
     internal fun openHistoryRecord(id: String) {
         if(!parked) { notice="주차 후 확인할 수 있어요"; return }
-        val saved=historyDrives.firstOrNull { it.session.id == id } ?: return
+        val saved=completedDrives.firstOrNull { it.session.id == id } ?: return
         // Viewing an old result must not restore or settle it as the current journey.
         selectedHistoryRecord=saved
         screen=Screen.RESULT
@@ -722,7 +612,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         connection.setConsoleCapture(false)
         consoleTest=false
         demo=!demo
-        reloadMileage()
         selectedHistoryRecord=null
         pendingBadges=emptyList()
         ownedBadges=prefs.getStringSet(if(demo) "badges-demo" else "badges-live",emptySet())?.toSet() ?: emptySet()
@@ -730,7 +619,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         collectionProgress = collectionStore.read(demo)
         recordedDistanceMeters = prefs.getLong(distanceKey(demo), 0)
         session=null; report=null; ranking=emptyList(); earned=0
-        badgeMileageEarned = 0
         remainingM = if(demo) selected.distanceKm*1000 else live.remainingM ?: 0.0
         screen=Screen.HOME
     }
@@ -745,45 +633,30 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
+        if(!demo && !live.beltConditionMet) { notice="운전석 벨트 상태를 확인한 뒤 참가해 주세요"; return }
         if(!beginService()) return
         activeRound = round
-        demoRoundStart = maxOf(clock(), round.opensAt)
+        demoRoundStart = maxOf(Instant.now(), round.opensAt)
         demoStartedAt = SystemClock.elapsedRealtime()
         startSession()
     }
     private fun startSession() {
-        // Recheck after asynchronous navigation; a failed entry must not consume today's game.
-        if (!driverBeltAllowsEntry()) {
-            endService()
-            return
-        }
-        val assigned = destinationVenueMatch ?: return
-        val id = UUID.randomUUID().toString()
-        val day = clock().atZone(ChallengeRound.seoul).toLocalDate()
-        if (!participationStore.claim(demo, day, id)) {
-            notice = "오늘 참가 내역이 있거나 참가 정보를 저장하지 못했어요. 참가 상태를 확인해 주세요."
-            endService()
-            return
-        }
         RecordingService.clearResult(getApplication())
         connection.setConsoleCapture(false)
         consoleTest=false
         completedDestinationName=null
+        val assigned = destinationVenueMatch ?: return
         if (!demo) selected=challengeSpots.first { it.venueId==assigned.venue.id }
         missedDeadline = false
         liveArrivalAt = null
         connection.drainPendingSamples()
         samples.clear(); turnDetector.reset(); lastTurnAt=0; lastReportAt=0; recordingStartedAtNanos=null
-        beltMonitor.reset(); beltDecision=beltMonitor.decision
-        connection.drainBeltObservations()
         progressReport=ScoreEngine.evaluate(emptyList())
         report=null; ranking=emptyList(); earned=0; pendingBadges=emptyList()
-        badgeMileageEarned = 0
         remainingM=distanceKm*1000
-        session=ChallengeSession(id,if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
+        session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
         recordingStartedAtNanos = if (!demo && phase == Phase.RECORDING) SystemClock.elapsedRealtimeNanos() else null
         screen=Screen.JOURNEY
-        if (!demo) checkSeatBelts(live, SystemClock.elapsedRealtime())
     }
     fun cancel() {
         if(!parked) return
@@ -824,7 +697,20 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     private fun consumeLive(v: LiveVehicle, now: Long) {
         val s=session ?: return
         if(!activeJourney) return
-        if (!checkSeatBelts(v, now)) return
+        val beltChecked = s.enforceBelt(v.freshBelt(now))
+        if (beltChecked.phase == Phase.DISQUALIFIED) {
+            session=beltChecked
+            report=null
+            progressReport=ScoreEngine.evaluate(emptyList())
+            ranking=emptyList()
+            earned=0
+            pendingBadges=emptyList()
+            recordingStartedAtNanos=null
+            turnDetector.interrupt()
+            notice="안전벨트 미착용으로 실격 처리했어요. 이번 점수·순위·보상은 지급하지 않습니다."
+            endService()
+            return
+        }
         if (s.phase == Phase.AWAITING_PARK) {
             if (v.parked) {
                 session = s.update(0.0, true, true)
@@ -841,13 +727,12 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             session=s.changeDestination(v.destinationId); notice="목적지가 변경되어 이번 기록을 종료했어요"; endService(); return
         }
         if (phase == Phase.RECORDING && now - lastTurnAt >= 200) {
-            turnDetector.accept(v.turnObservation(now))
+            if (v.freshBelt(now) == true) turnDetector.accept(v.turnObservation(now)) else turnDetector.interrupt()
             lastTurnAt = now
         }
         if (v.arrived && v.arrivedAt != null && v.destinationId == s.destinationId) {
             // Include pending samples before arrival closes the recording phase.
             drainRecordingSamples(now * 1_000_000L)
-            turnDetector.interrupt()
             progressReport=currentReport()
             recordingStartedAtNanos=null
             liveArrivalAt = v.arrivedAt
@@ -864,31 +749,6 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
     private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
-        if (completedDriveStore.readAll().any { it.session.id == s.id }) return
-        val deadline=deadlineOutcome(CompletedDrive(s,currentReport(),destinationName,demo,emptyList(),0,false,
-            completedAtEpochMs=clock().toEpochMilli(),
-            participationDay=participationStore.dayFor(demo,s.id)?.toString()),arrivedAt,activeRound)
-        if (deadline != null) {
-            session=deadline.session
-            missedDeadline=true
-            completedDestinationName=deadline.name
-            report=deadline.report; progressReport=deadline.report
-            ranking=emptyList(); earned=0; badgeMileageEarned=0; pendingBadges=emptyList()
-            recordingStartedAtNanos=null; turnDetector.interrupt()
-            completedDriveStore.save(deadline)
-            completedDrives=completedDriveStore.readAll()
-            selectedHistoryRecord=deadline
-            notice="대회 종료 시각 이후에 도착해 시간 초과로 실격됐어요. 오늘 참가로 기록되며 배지·보상은 지급되지 않아요."
-            completed++
-            screen=Screen.RESULT
-            if (parked) RecordingService.notifyResult(getApplication())
-            endService()
-            return
-        }
-        if (!demo && beltDecision.hadUnverifiedMotion) {
-            saveBeltOutcome(s, DriveOutcome.UNVERIFIABLE, BeltFailureReason.TELEMETRY_UNAVAILABLE)
-            return
-        }
         val r=currentReport()
         progressReport=r
         selectedHistoryRecord=null
@@ -896,27 +756,19 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         missedDeadline = arrivedAt != null && activeRound?.let { arrivedAt >= it.closesAt } == true
         val withinRound = arrivedAt?.let { activeRound?.contains(it) } == true
         val score = r.score
-        val participationDay = participationStore.dayFor(demo, s.id)
-        val result = CompletedDrive(s, r, destinationName, demo, emptyList(), 0, missedDeadline,
-            completedAtEpochMs = clock().toEpochMilli(), participationDay = participationDay?.toString())
-        val recognition = recognizeResult(result, participationDay != null, withinRound)
-        val accepted = recognition == ResultRecognition.ACCEPTED
-        val previousCollection = collectionProgress
-        val previousRanks = rankBadgeProgress
-        val editor = prefs.edit()
         if (arrivedAt != null && score != null) {
             recordedDistanceMeters += r.validDistanceM.roundToLong()
-            editor.putLong(distanceKey(demo), recordedDistanceMeters)
+            prefs.edit().putLong(distanceKey(demo), recordedDistanceMeters).apply()
         }
-        if (accepted && score != null) {
-            val day = requireNotNull(participationDay)
+        if (arrivedAt != null && withinRound && s.rankingEligible && r.valid && score != null) {
+            val day = arrivedAt.atZone(ChallengeRound.seoul).toLocalDate()
             val progress = collectionProgress.recordChallenge(day, score)
             if (progress != collectionProgress) {
-                collectionStore.writeChallenge(editor, demo, progress)
+                collectionStore.saveChallenge(demo, progress)
                 collectionProgress = progress
             }
         }
-        if(demo && accepted) {
+        if(demo && withinRound && s.rankingEligible && r.valid && r.score!=null) {
             // Popularity is a venue-wide count; prototype settlement uses a five-person group.
             val fixtures = listOf(
                 Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
@@ -930,68 +782,27 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             } else fixtures.take(selected.demoPeers)
             ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
-            earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(participationDay).toString())
-            if(allocation>0 && earned==0) notice="이미 정산된 경기 또는 참가일의 보상이에요. 중복 지급하지 않아요."
+            earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(arrivedAt).atZone(ChallengeRound.seoul).toLocalDate().toString())
+            balance=ledger.balance
+            prefs.edit().putInt("balance",balance).putStringSet("settled",ledger.settlementIds).putStringSet("daily",ledger.dailyKeys).apply()
+            if(allocation>0 && earned==0) notice="오늘의 보상 한도를 적용했어요 · 목적지별 1회, 하루 2회"
         } else { ranking=emptyList(); earned=0 }
         val playerRank = ranking.firstOrNull { it.id == "나" }?.rank
-        if (accepted && playerRank != null) {
-            recordRankBadgeProgress(editor, requireNotNull(participationDay).atStartOfDay(ChallengeRound.seoul).toInstant(), playerRank, ranking.size)
+        if (playerRank != null && arrivedAt != null) {
+            recordRankBadgeProgress(arrivedAt, playerRank, ranking.size)
         }
-        val legacyAwards = if (accepted) BadgeRules.newAwards(r.valid, s.destinationId, r.score, playerRank, ownedBadges) else emptyList()
-        val collectionAwards = if (accepted) creditNewBadges(previousCollection, previousRanks, collectionProgress, rankBadgeProgress) else emptyList()
-        badgeMileageEarned = collectionAwards.sumOf { it.mileage }
-        pendingBadges = legacyAwards + collectionAwards
-        ownedBadges = ownedBadges + legacyAwards.map { it.id }
-        editor.putStringSet(if (demo) "badges-demo" else "badges-live", ownedBadges)
-        writeMileage(editor)
+        pendingBadges=BadgeRules.newAwards(r.valid,s.destinationId,r.score,playerRank,ownedBadges)
+        ownedBadges=ownedBadges+pendingBadges.map { it.id }
+        prefs.edit().putStringSet(if(demo) "badges-demo" else "badges-live",ownedBadges).apply()
         if (voiceEnabled && uiVisible && parked)
             voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
         completedDestinationName=destinationName
-        completedDriveStore.save(result.copy(ranking=ranking, earned=earned, badgeMileage=badgeMileageEarned,
-            recognition=recognition, awardedBadges=pendingBadges), editor)
-        if (!accepted) notice="${recognition.label}으로 개인 기록만 보관해요. 경기 보상·배지 집계에서는 제외돼요."
-        balance = ledger.balance
+        completedDriveStore.save(CompletedDrive(s,r,destinationName,demo,ranking,earned,missedDeadline,
+            completedAtEpochMs=System.currentTimeMillis()))
         completedDrives=completedDriveStore.readAll()
         completed++
         screen=Screen.RESULT
         if (parked) RecordingService.notifyResult(getApplication())
-        endService()
-    }
-    private fun checkSeatBelts(v: LiveVehicle, now: Long): Boolean {
-        if (!activeJourney) return false
-        connection.drainBeltObservations().forEach { beltMonitor.accept(it) }
-        beltDecision=beltMonitor.accept(v.beltObservation(now))
-        if (beltDecision.hadUnverifiedMotion || beltDecision.verdict != BeltVerdict.SAFE)
-            progressReport=progressReport.copy(score=null, valid=false)
-        if (beltDecision.verdict != BeltVerdict.DISQUALIFIED) return true
-        val failed=requireNotNull(session).enforceBelt(beltDecision)
-        val reason=if (beltDecision.seat == BeltSeat.PASSENGER) BeltFailureReason.PASSENGER_UNBUCKLED
-            else BeltFailureReason.DRIVER_UNBUCKLED
-        saveBeltOutcome(failed, DriveOutcome.DISQUALIFIED, reason)
-        return false
-    }
-
-    /** A belt-invalid journey is persisted before service shutdown; it never reaches settlement. */
-    private fun saveBeltOutcome(s: ChallengeSession, outcome: DriveOutcome, reason: BeltFailureReason) {
-        if (completedDriveStore.readAll().any { it.session.id == s.id }) return
-        val name=destinationName
-        drainRecordingSamples(SystemClock.elapsedRealtimeNanos())
-        val invalid=currentReport().copy(score=null, valid=false)
-        session=s
-        completedDestinationName=name
-        report=invalid; progressReport=invalid
-        ranking=emptyList(); earned=0; badgeMileageEarned=0; pendingBadges=emptyList()
-        recordingStartedAtNanos=null; turnDetector.interrupt()
-        val saved=CompletedDrive(s, invalid, name, demo, emptyList(), 0, false,
-            completedAtEpochMs=clock().toEpochMilli(), outcome=outcome, beltFailureReason=reason,
-            participationDay=participationStore.dayFor(demo, s.id)?.toString(),
-            recognition=if(outcome==DriveOutcome.DISQUALIFIED) ResultRecognition.DISQUALIFIED else ResultRecognition.UNVERIFIABLE)
-        completedDriveStore.save(saved)
-        completedDrives=completedDriveStore.readAll()
-        selectedHistoryRecord=saved
-        notice=if (outcome == DriveOutcome.DISQUALIFIED) "${reason.label}으로 실격 처리됐어요. 주차 후 내 기록에서 확인해 주세요."
-            else "주행 중 안전벨트 확인에 필요한 정보가 부족해 이번 점수·순위·보상을 집계하지 않았어요."
-        if (parked) { screen=Screen.RESULT; RecordingService.notifyResult(getApplication()) }
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.setConsoleCapture(false); connection.stop(); voice.stop() }
