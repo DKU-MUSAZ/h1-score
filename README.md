@@ -1,78 +1,171 @@
 # 안운잘부 · 무사즈
 
-**안전운전 잘 부탁드립니다.** 같은 목적지로 향하는 운전자들이 마지막 10km의 주행 습관을 비교하고, 주차 후 점수·순위·마일리지·배지를 확인하는 Pleos 차량용 앱 프로토타입입니다.
+**안전운전 잘 부탁드립니다.** 목적지 주변의 챌린지에 참여하고, 도착 후 자신의 운전 습관을 돌아보며 마일리지와 배지를 모으는 Pleos 차량용 앱입니다.
 
-[실행 안내](docs/prototype/START-HERE.md) · [카카오맵 설정](docs/prototype/ENVIRONMENT.md) · [시연 영상 MP4](docs/media/demo-walkthrough.mp4) · [SDK와 점수 구현](docs/prototype/IMPLEMENTATION.md)
+같은 목적지 권역으로 향하는 운전자들이 안전운전 점수로 선의의 경쟁을 하고, 안전하게 달린 경험이 다음 주행의 동기가 되는 서비스를 제안합니다. 현재 저장소는 차량·내비게이션 연동과 주행 평가, 기록 조회, 시연 보상 흐름을 구현한 Android 프로토타입입니다.
 
-## 처음 시작하기
+[실행 안내](docs/prototype/START-HERE.md) · [카카오맵 설정](docs/prototype/ENVIRONMENT.md) · [이용 규칙 및 구현 명세](docs/specifications/안운잘부-이용규칙-및-구현명세.md) · [기존 시연 영상](docs/media/demo-walkthrough.mp4)
 
-설치 후 주차 상태에서 **앱 소개 → 데이터 이용 안내·동의 → 닉네임 → 5단계 기능 안내**를 진행합니다. 안내를 완료하거나 건너뛰면 다음 실행부터 자동으로 다시 표시하지 않습니다.
+<img src="docs/media/readme/01-home.png" alt="Pleos에서 실행한 안운잘부 챌린지 홈" width="100%">
 
-다시 테스트하려면 **마이페이지 → 처음 설정 다시 보기 → 다시 시작**을 누르세요. 안내 상태만 초기화하고 주행 기록·마일리지·배지·저장한 목적지·닉네임은 유지합니다.
+## 왜 안운잘부인가요?
 
-[새 무사즈 포즈로 보는 최초 설정·튜토리얼 (1.7배속)](docs/media/pr-destination/tutorial-1.7x.mp4) · [구현 범위·검증 기록](docs/verification/2026-11-10-drive-ui.md)
+운전자는 자신의 운전에서 무엇이 좋았고 무엇을 개선해야 하는지 구체적으로 돌아볼 기회가 많지 않습니다. 안운잘부는 주행 후 피드백을 운전의 오답노트처럼 제공하고, 챌린지와 수집 요소로 안전운전을 꾸준히 실천할 동기를 만들고자 합니다.
 
-<p>
-  <img src="docs/media/pr-destination/tutorial.png" alt="무사즈 최초 소개" width="48%">
-  <img src="docs/media/first-run/spotlight.png" alt="검색창만 밝게 강조하는 튜토리얼" width="48%">
-</p>
+- **운전 습관을 돌아봅니다.** 제한속도 준수와 급가감속, 방향지시등 사용 등 주행 데이터를 바탕으로 피드백을 제공합니다.
+- **일상의 이동을 참여로 연결합니다.** 통학·출퇴근·외근 목적지 주변에서 챌린지를 찾고, 같은 개최지와 회차를 기준으로 비교하도록 설계했습니다.
+- **작은 성취를 쌓습니다.** 출석 도장, 명예 훈장, 스팟 투어 배지로 참여와 방문의 목표를 제공합니다.
+- **차량 관리로 이어집니다.** 적립 마일리지를 차량 관리 쿠폰에 사용하는 것이 서비스 목표입니다. 현재 교환은 시연 범위이며 실제 정비소 사용은 후속 연동입니다.
 
-## 화면 흐름
+## 이용 흐름
 
-영상은 아래 에뮬레이터 캡처를 순서대로 묶은 21초 요약입니다. 촬영 당시 앱 이름과 아이콘이 화면에 남아 있습니다. Pleos 내장 내비 화면과 시연용 주행·결과 화면을 구분했습니다.
+**출발 전 목적지 선택 → 챌린지 참가 → 마지막 10km 평가 → 도착·주차 → 피드백 확인 → 기록·배지·마일리지**
 
-| 단계 | 화면 | 운전자가 하는 일 |
+| 단계 | 사용자가 하는 일 | 앱의 역할 |
 | --- | --- | --- |
-| 1 | [챌린지 지도](docs/media/01-challenge-map.png) | 목적지를 검색하고 지도 위 챌린지 마커에서 참가 인원과 마감 정보를 확인합니다. 마커를 선택하고 주차 상태에서 참가에 동의합니다. |
-| 2 | [Pleos 내장 내비](docs/media/02-pleos-navigation.png) | 선택한 목적지로 내장 내비 길 안내를 시작합니다. 캡처에서는 여의도한강공원 안내가 시작됐습니다. |
-| 3 | [10km 구간 기록](docs/media/03-demo-recording.png) | 참가 예약 후 내비 경로의 남은 거리가 10km에 들어오면 기록을 시작하는 흐름입니다. 이 캡처는 시연 모드입니다. |
-| 4 | [도착과 주차 확인](docs/media/04-demo-arrival.png) | 도착 후 주차가 확인되면 결과를 열 수 있습니다. 시연 모드에서 재현한 화면입니다. |
-| 5 | [안전운전 점수와 순위](docs/media/05-demo-results.png) | 점수, 순위, 적립 마일리지를 확인합니다. 영상 예시는 92점·공동 1위·80M입니다. |
-| 6 | [신규 배지](docs/media/06-demo-badge.png) | 새 배지를 열 때 금색 방패를 든 무사즈를 만납니다. 마일리지 탭에서 정비 혜택 예시와 필요 M을 확인할 수 있습니다. |
+| 출발 전 | 목적지 검색, 참가 조건 확인 | 목적지 반경 1km 안에서 가장 가까운 등록 개최지를 연결합니다. |
+| 참가 | 주차 상태와 운전석 벨트 확인, 참가 동의 | 내비 경로를 확인하고 참가를 확정합니다. |
+| 주행 | 평소처럼 안전하게 운전 | 남은 경로가 10km에 들어오면 기록을 시작하고 차량·내비 정보를 평가합니다. |
+| 도착 후 | 목적지 도착 후 주차 | 주행 결과를 준비하고 주차 후 확인할 수 있도록 합니다. |
+| 돌아보기 | 내 기록에서 결과 확인 | 점수와 운전 습관 피드백, 결과 인정 여부를 보여줍니다. |
+| 다음 참여 | 배지 목표와 마일리지 확인 | 누적된 성과를 다음 안전운전의 동기로 연결합니다. |
+
+주행 중 상세 조작은 차량의 UX 제한과 주차 상태에 따라 제한합니다. 목적지 근처에 챌린지가 없으면 일반 길 안내로 연결하는 흐름을 제공합니다.
+
+## 실제 실행 화면
+
+아래는 **일반 Pleos 연결 모드**의 현재 실행 화면입니다. 주행 기록과 마일리지가 없는 상태이며, 검색 화면의 참가 인원은 화면에 표시된 것처럼 시연 예시입니다. 왼쪽 차량 그림과 하단 조작부는 Pleos 시스템 UI이고 오른쪽이 안운잘부 앱입니다. 이미지를 클릭하면 원본 크기로 볼 수 있습니다.
+
+### 챌린지와 목적지 검색
+
+누적 주행거리와 이번 주 안전점수를 확인하고, 최근 목적지·집·회사 바로가기·인기 챌린지 스팟에서 다음 이동을 준비합니다.
 
 <p>
-  <img src="docs/media/01-challenge-map.png" alt="안운잘부 챌린지 지도" width="48%">
-  <img src="docs/media/02-pleos-navigation.png" alt="Pleos 내장 내비의 여의도한강공원 안내" width="48%">
-  <img src="docs/media/05-demo-results.png" alt="시연 안전운전 점수와 순위" width="48%">
-  <img src="docs/media/06-demo-badge.png" alt="신규 배지를 든 무사즈" width="48%">
+  <a href="docs/media/readme/01-home.png"><img src="docs/media/readme/01-home.png" alt="챌린지 홈과 무사즈" width="49%"></a>
+  <a href="docs/media/readme/06-search.png"><img src="docs/media/readme/06-search.png" alt="최근 목적지와 인기 챌린지 검색 화면" width="49%"></a>
 </p>
 
-## 어떤 데이터가 어디에 쓰이나요?
+### 내 기록과 마일리지
 
-| 구분 | 역할 |
+내 기록은 주·월 달력과 정렬 기능으로 주행을 찾아보는 화면입니다. 현재 캡처에는 저장된 주행이 없어 첫 챌린지를 안내합니다. 마일리지는 보유 잔액, 차량 관리 혜택과 나의 쿠폰함을 제공합니다.
+
+<p>
+  <a href="docs/media/readme/02-history.png"><img src="docs/media/readme/02-history.png" alt="주간 달력과 주행 기록이 없는 상태" width="49%"></a>
+  <a href="docs/media/readme/03-mileage.png"><img src="docs/media/readme/03-mileage.png" alt="보유 마일리지와 와이퍼 에어컨 필터 엔진오일 혜택" width="49%"></a>
+</p>
+
+### 배지와 마이페이지
+
+배지는 출석 도장·명예 훈장·스팟 투어로 구성합니다. 마이페이지는 운전자 프로필과 함께 차량 상태를 ‘출발 전 확인’, ‘주행 및 충전’으로 나누어 보여줍니다. 차량 신호는 지원 여부와 수신 상태에 따라 표시합니다.
+
+<p>
+  <a href="docs/media/readme/04-badges.png"><img src="docs/media/readme/04-badges.png" alt="세 가지 배지 분류와 출석 도장 진행률" width="49%"></a>
+  <a href="docs/media/readme/05-profile.png"><img src="docs/media/readme/05-profile.png" alt="운전자 프로필과 차량 상태를 보여주는 마이페이지" width="49%"></a>
+</p>
+
+## 안전운전 평가
+
+기획서의 평가 대상은 제한속도, 방향지시등, 급가속, 급감속, 안전벨트입니다. 차량과 내비게이션에서 받은 정보를 검증한 뒤 점수와 결과에 반영합니다.
+
+현재 점수 엔진은 **기본 60점 + 거리 기반 가점 − 회전 관련 감점** 구조입니다. 제한속도 준수는 km당 최대 2.5점, 부드러운 주행은 km당 최대 1.5점을 적립하며, 평가 거리는 최대 10km입니다. 급가감속이 확인된 구간이나 유효한 입력을 확보하지 못한 구간의 처리에는 별도 조건이 적용됩니다.
+
+안전벨트 미착용과 필수 신호 확인 불가, 시간 초과 등은 단순한 점수 차이와 구분하여 결과 인정 여부에 반영합니다. 회전 평가는 GPS·내비 회전 안내·조향·방향지시등을 교차 확인하며, 불확실한 신호를 확정 위반으로 취급하지 않도록 설계했습니다.
+
+자세한 구현은 [점수 엔진](android/core/src/main/kotlin/ai/musaz/h1score/core/ChallengeRules.kt)과 [이용 규칙 명세](docs/specifications/안운잘부-이용규칙-및-구현명세.md)를 참고하세요. 실차에서 효과를 검증한 안전성 지표나 사고 예방 성과를 의미하지 않습니다.
+
+## 차량 특화 구현
+
+```text
+차량 신호 + 내비게이션 + GPS
+              ↓
+     신호 유효성·최신성 확인
+              ↓
+   참가 조건·주행 이벤트·점수 판정
+              ↓
+     결과 저장과 주차 후 피드백
+              ↓
+       기록·배지·마일리지
+```
+
+| 구성 | 활용 |
 | --- | --- |
-| Kakao Maps Android SDK | 챌린지 탐색 지도와 목적지 마커 |
-| Pleos NaviHelper | 내장 내비 안내 요청, 목적지와 남은 거리 등 내비 데이터 |
-| Pleos Vehicle / AAOS | 지원·권한이 확인된 차량 상태와 속도 입력 |
-| Kotlin 점수 엔진 | 주행 입력을 검증하고 점수·시연 순위·마일리지·배지를 계산 |
-| 시연 데이터 | 가상의 참가자·순위 및 정비 혜택을 재현 |
+| Kotlin · Jetpack Compose | 차량 화면과 상태 기반 UI |
+| ViewModel · StateFlow | 참가·기록·도착·결과 화면 상태 관리 |
+| Android Automotive 차량 속성 API | 차량 속도·기어 등 주행 입력 |
+| Pleos Vehicle SDK | 안전벨트·조향·방향지시등 및 차량 상태 조회 |
+| Pleos NaviHelper SDK | 목적지·남은 거리·도로 제한속도·회전 안내·도착 이벤트 |
+| Android LocationManager | GPS 위치·진행방향·정확도 |
+| Kakao Maps SDK · Local REST API | 지도와 장소 검색 |
+| CarUxRestrictionsManager | 주행 중 조작 제한 |
+| Pleos TextToSpeech · Android 알림 | 기록 관련 음성 안내와 완료 알림 |
+| Kotlin core · SharedPreferences | 판정 로직, 주행 기록과 보상 이력의 로컬 저장 |
 
-Pleos 에뮬레이터에서 내장 내비 길 안내 시작을 확인했습니다. 이번 내비 경로 재생에서는 남은 거리 갱신과 도착 콜백까지 확인하지 못했습니다. 주행·도착·순위·마일리지의 전체 화면 흐름은 앱의 시연 모드에서 재현합니다. 실시간 차량 매칭 서버와 실제 정비 교환은 후속 구현 범위입니다.
+## 현재 구현 범위와 다음 단계
 
-## 실행과 검증
+| 구분 | 현재 프로토타입 | 후속 개발 |
+| --- | --- | --- |
+| 챌린지 | 등록 개최지와 목적지 매칭, 회차·참가 조건·기록 상태 관리 | 실제 사용자 매칭, 서버 기준 참가 제한 |
+| 주행 평가 | 차량·내비 입력, 점수 엔진, 결과 저장과 피드백 | 실차 환경별 신호·판정 정확도 검증 |
+| 순위와 보상 | 시연 참가자 비교와 로컬 보상 처리 | 회차 종료 후 서버 순위 확정·지급 원장 |
+| 마일리지 | 혜택 안내, 시연 교환과 쿠폰함 | 실제 쿠폰 발행·사용 인증·제휴 정비소 연동 |
+| 배지 | 출석·명예·스팟 분류와 진행 상황 | 서버 확정 순위 및 제휴처 방문 인증 연동 |
+| 사용처 탐색 | 현재 위치 기반 탐색 설계 문서 | 제휴 매장 데이터·위치 기반 조회·거리순 정렬 |
+| 평가 확장 | 차량 신호 중심 평가 | 카메라 기반 차선 변경·안전거리 평가 연구 |
 
-1. 저장소를 복제하고 Android Studio에서 `android/`을 엽니다.
-2. 실제 지도 표시가 필요하면 [카카오맵과 로컬 설정](docs/prototype/ENVIRONMENT.md)을 적용합니다.
-3. 실행 대상에 Pleos Connect Emulator를 선택하고 `app`을 실행합니다.
-4. 점수와 보상 흐름을 재현할 때는 [시연 안내](docs/prototype/START-HERE.md)를, 차량 상태를 조작할 때는 [Virtual Console 가이드](https://document.pleos.ai/docs/connect/guide/getting-started/application-development/use-vehicle-emulator)를 참고합니다.
+[현재 위치 기반 마일리지 사용처 탐색 설계](android/docs/design/mileage-nearby-redemption-plan.md)
+
+현재 위치를 기준으로 찾는 마일리지 사용처와 **목적지**를 기준으로 매칭하는 챌린지 개최지는 서로 다른 기능입니다. 주변 정비소 탐색이 이미 동작하는 기능으로 오해되지 않도록 구현 범위를 명시합니다.
+
+## 실행하기
+
+1. Android Studio에서 저장소의 `android/` 폴더를 엽니다.
+2. Android SDK와 프로젝트 의존성을 준비하고 Gradle Sync를 실행합니다.
+3. [로컬 환경 설정](docs/prototype/ENVIRONMENT.md)에 따라 카카오 키와 Android 앱 등록 정보를 설정합니다.
+4. Pleos Connect 에뮬레이터를 켜고 `app`을 빌드·실행합니다.
+5. 처음 실행하면 소개·데이터 이용 안내·닉네임·기능 안내를 진행합니다. 이후 마이페이지의 **사용법 다시 보기**에서 기능 안내를 다시 볼 수 있습니다.
+
+Windows PowerShell에서 빌드:
+
+```powershell
+cd android
+.\gradlew.bat :core:test :app:assembleDebug
+```
+
+macOS·Linux에서 빌드:
 
 ```bash
 cd android
 ./gradlew :core:test :app:assembleDebug
 ```
 
-## 폴더 구조
+Pleos Virtual Console:
 
 ```text
-android/app/      Compose 화면, 카카오맵과 Pleos 어댑터, 앱 리소스
-android/core/     점수·마일리지·배지 로직과 JVM 단위 테스트
-docs/prototype/   실행 환경, UX, 구현 범위, 검증 기록
-docs/media/       에뮬레이터 캡처와 영상 요약
-mascots/          무사즈 원본 이미지와 앱용 표정
-scripts/          로컬 검증과 소스 패키징
-sources/          마스코트 제작 자료
-index.html        기획과 마스코트 모음
+adb forward tcp:8088 tcp:8088
+http://127.0.0.1:8088/
 ```
 
-- [주제 구체화](docs/주제-구체화.md) · [UX와 마스코트](docs/prototype/DESIGN.md) · [검증 기록](docs/prototype/QA.md)
-- 구조 레퍼런스는 Google의 [Now in Android](https://github.com/android/nowinandroid)와 [Android Architecture Samples](https://github.com/android/architecture-samples)입니다. 이 저장소는 Android 앱과 독립적으로 테스트할 수 있는 점수 모듈을 나누고, 실행 문서와 시연 자료를 별도로 관리합니다.
+문서에 사용한 앱 버전은 빌드·설치·홈 실행을 확인했습니다. 이번 README 작업에서는 메뉴 화면을 직접 확인하고 캡처했으며, 전체 자동 테스트나 실제 차량 주행을 새로 수행하지 않았습니다. 기존 시연 영상은 이전 버전 자료로, 위 최신 캡처와 UI가 다를 수 있습니다.
+
+## 프로젝트 구조
+
+```text
+android/app/         Compose 화면, 차량·내비 연동, 기록 저장
+android/core/        점수·참가·배지·마일리지 판정과 단위 테스트
+android/docs/       구현 설계와 PR별 화면 자료
+docs/prototype/     실행 환경과 시연 안내
+docs/specifications/ 이용 규칙과 구현 명세
+docs/media/         기존 시연 영상과 화면 자료
+```
+
+## 기획과 현재 구현의 차이
+
+기획서의 목표와 현재 프로토타입의 동작이 다른 항목입니다. 아래 차이는 후속 개발에서 정책과 구현을 함께 조정할 대상입니다.
+
+| 항목 | 기획서 | 현재 확인한 구현 |
+| --- | --- | --- |
+| 마감 후 도착 | 다음 시간대에 포함하여 집계 | 해당 회차 시간 초과 실격 처리 |
+| 순위 보상 | 상위 10% 추가 보상 | 시연 참가자 3~5명에 대한 고정 보상표 |
+| 위험운전 반영 | 급가속·급감속 횟수에 따른 감점으로 설명 | 거리 기반 가점과 이벤트 구간 처리, 회전 감점 |
+| 차로 변경 평가 | 도로 형태를 고려한 방향지시등 평가 | 회전 교차 판정 구현 범위를 기준으로 안내 필요 |
+| 제휴 혜택 | 정비소 쿠폰 이용과 방문 배지 | 실제 발급·사용·방문 인증은 후속 연동 |
