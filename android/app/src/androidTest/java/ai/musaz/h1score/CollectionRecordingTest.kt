@@ -1,6 +1,8 @@
 package ai.musaz.h1score
 
 import ai.musaz.h1score.core.ChallengeRound
+import ai.musaz.h1score.core.CollectionProgress
+import ai.musaz.h1score.core.RankBadgeGoal
 import ai.musaz.h1score.core.SpotTour
 import android.app.Application
 import android.content.ComponentName
@@ -23,17 +25,61 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
+import java.time.LocalDate
+import java.time.DayOfWeek
 import java.util.UUID
 
 class CollectionRecordingTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun platinumWeeklyQuestPersistsAndAwardsOnlyOnceInDemo() {
+        val app = isolatedApplication()
+        lateinit var model: ChallengeViewModel
+        val goal = RankBadgeGoal.CONSISTENT_FLOW
+        val monday = LocalDate.now(ChallengeRound.seoul).with(DayOfWeek.MONDAY)
+        ui.runOnIdle {
+            app.prefs.edit().apply {
+                RankBadgeGoal.entries.filter { it.tier < ai.musaz.h1score.core.RankTier.PLATINUM }
+                    .forEach { putInt("rank-badges-demo-${it.id}", it.targetDays) }
+                putStringSet("rank-badges-demo-${goal.id}-weeks",
+                    setOf(monday.minusWeeks(1).toString(), monday.minusWeeks(2).toString()))
+            }.commit()
+            model = ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+            }
+            assertEquals(2, model.rankBadgeProgress.days(goal))
+            val now = Instant.now()
+            model.accept(ChallengeRound("주간 순위 검증", now.minusSeconds(60), now.plusSeconds(120)))
+            model.runDemo()
+        }
+        ui.waitUntil(40_000) { model.report != null }
+        ui.runOnIdle {
+            assertEquals(3, model.rankBadgeProgress.days(goal))
+            assertEquals(20, model.badgeMileageEarned)
+            assertEquals(120, model.balance)
+            val restored = ChallengeViewModel(app)
+            assertEquals(0, restored.rankBadgeProgress.days(goal))
+            restored.openCompletedResult()
+            assertEquals(3, restored.rankBadgeProgress.days(goal))
+            assertEquals(3, restored.rankBadgeProgress.weeksByGoal[goal]?.size)
+            assertEquals(120, restored.balance)
+            restored.openCompletedResult()
+            assertEquals(120, restored.balance)
+        }
+    }
+
     @Test fun spotProgressRequiresMatchingArrivalAndParkAndPersistsOnce() {
         val app = isolatedApplication()
         ui.runOnIdle {
+            val spot = SpotTour.SEOUL
+            val day = LocalDate.now(ChallengeRound.seoul)
+            val editor = app.prefs.edit()
+            CollectionProgressStore(app.prefs).writeVisit(editor, false, spot,
+                CollectionProgress().recordVisit(spot, day.minusDays(2)).recordVisit(spot, day.minusDays(1)))
+            editor.commit()
             val model = ChallengeViewModel(app)
             val parked = parkedVehicle()
-            val spot = SpotTour.SEOUL
             model.receiveVehicle(parked)
             model.startSpotVisit(spot)
             assertEquals(spot, model.trackedSpot)
@@ -43,14 +89,17 @@ class CollectionRecordingTest {
             model.receiveVehicle(route)
             val arrival = route.copy(arrived = true, arrivedAt = Instant.now(), remainingM = 0.0)
             model.receiveVehicle(arrival.copy(destinationId = "other"))
-            assertEquals(0, model.collectionProgress.visits(spot))
+            assertEquals(2, model.collectionProgress.visits(spot))
             model.receiveVehicle(arrival.copy(gearPark = false))
-            assertEquals(0, model.collectionProgress.visits(spot))
+            assertEquals(2, model.collectionProgress.visits(spot))
+            assertEquals(0, model.balance)
             model.receiveVehicle(arrival)
             model.receiveVehicle(arrival)
             assertNull(model.trackedSpot)
-            assertEquals(1, model.collectionProgress.visits(spot))
-            assertEquals(1, CollectionProgressStore(app.prefs).read(false).visits(spot))
+            assertEquals(3, model.collectionProgress.visits(spot))
+            assertEquals(50, model.balance)
+            assertEquals(50, ChallengeViewModel(app).balance)
+            assertEquals(3, CollectionProgressStore(app.prefs).read(false).visits(spot))
         }
     }
 
@@ -58,6 +107,12 @@ class CollectionRecordingTest {
         val app = isolatedApplication()
         lateinit var model: ChallengeViewModel
         ui.runOnIdle {
+            val lastMonday = LocalDate.now(ChallengeRound.seoul).minusWeeks(1).with(DayOfWeek.MONDAY)
+            val previous = CollectionProgress((0L..3L).associate { lastMonday.plusDays(it) to 92 })
+            val editor = app.prefs.edit().putInt("rank-badges-demo-${RankBadgeGoal.FIRST_RANK.id}", 4)
+                .putInt("rank-badges-demo-${RankBadgeGoal.CALM_START.id}", 4)
+            CollectionProgressStore(app.prefs).writeChallenge(editor, true, previous)
+            editor.commit()
             model = ChallengeViewModel(app)
             model.receiveVehicle(parkedVehicle())
             model.switchSource()
@@ -70,12 +125,74 @@ class CollectionRecordingTest {
             assertNotNull(model.report?.score)
             assertEquals(minOf(model.selected.demoPeers, 4) + 1, model.ranking.size)
             val store = CollectionProgressStore(app.prefs)
-            assertEquals(1, model.collectionProgress.challengeDays)
-            assertEquals(1, store.read(true).challengeDays)
+            assertEquals(5, model.collectionProgress.challengeDays)
+            assertEquals(5, store.read(true).challengeDays)
             assertEquals(0, store.read(false).challengeDays)
+            assertEquals(100, model.earned)
+            assertEquals(30, model.badgeMileageEarned) // attendance 15 + first rank 5 + calm start 10
+            assertEquals(130, model.balance)
+            assertEquals(30, CompletedDriveStore(app.prefs).read()?.badgeMileage)
+            val restored = ChallengeViewModel(app)
+            assertEquals(0, restored.balance)
+            restored.openCompletedResult()
+            assertEquals(30, restored.badgeMileageEarned)
+            assertEquals(130, restored.balance)
             assertTrue(model.recordedDistanceMeters >= 9_000)
             assertEquals(model.recordedDistanceMeters, app.prefs.getLong("recorded-distance-demo", 0))
             assertEquals(0L, app.prefs.getLong("recorded-distance-live", 0))
+        }
+    }
+
+    @Test fun demoSpotMileageRequiresThreeVisitsAndStaysInTheDemoWallet() {
+        val app = isolatedApplication()
+        val model = ui.runOnIdle {
+            ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+                receiveVehicle(LiveVehicle(speedMps = 0.0, gearPark = null, uxRestricted = false))
+                navigate(Screen.BADGES)
+            }
+        }
+        ui.setContent { H1App(model) }
+        val spot = SpotTour.SEOUL
+        val dialog = hasAnyAncestor(isDialog())
+        ui.onNode(hasText("스팟 투어") and isSelectable()).performClick()
+        ui.onNodeWithText("시연용 - 달성 예시보기").performClick()
+        ui.onNodeWithText("서울 오토 라이브러리").performClick()
+        ui.onNode(dialog and hasText("획득 보상 +50M")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("시연 방문 추가")).assertDoesNotExist()
+        ui.onNode(dialog and hasText("확인")).performClick()
+        ui.onNodeWithText("예시 종료").performClick()
+        ui.onNodeWithText("서울 오토 라이브러리").performClick()
+        val visit = ui.onNode(dialog and hasText("시연 방문 추가"))
+        repeat(3) { index ->
+            visit.performClick()
+            ui.runOnIdle {
+                assertEquals(index + 1, model.collectionProgress.visits(spot))
+                assertEquals(if (index == 2) 50 else 0, model.balance)
+            }
+        }
+        ui.onNode(dialog and hasText("3 / 3회 · 획득")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("시연 마일리지 적립이 완료됐어요.")).assertIsDisplayed()
+        visit.assertDoesNotExist()
+        ui.onNode(dialog and hasText("확인")).performClick()
+        ui.onNode(hasText("마일리지") and isSelectable()).performClick()
+        ui.onNodeWithText("시연 잔액").assertIsDisplayed()
+        ui.onNodeWithText("50").assertIsDisplayed()
+        ui.runOnIdle {
+            model.startSpotVisit(spot)
+            assertEquals(50, model.balance)
+            assertEquals(3, model.collectionProgress.visits(spot))
+            assertEquals(0, CollectionProgressStore(app.prefs).read(false).visits(spot))
+            model.receiveVehicle(parkedVehicle())
+            model.switchSource()
+            assertEquals(0, model.balance)
+            assertEquals(0, model.collectionProgress.visits(spot))
+            val restored = ChallengeViewModel(app)
+            restored.receiveVehicle(parkedVehicle())
+            restored.switchSource()
+            assertEquals(50, restored.balance)
+            assertEquals(3, restored.collectionProgress.visits(spot))
         }
     }
 
@@ -222,7 +339,8 @@ class CollectionRecordingTest {
         ui.runOnIdle {
             val now=Instant.now()
             val round=ChallengeRound("배정 검증",now.minusSeconds(30),now.plusSeconds(3600))
-            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String)=ChallengeViewModel(app).apply {
+            fun model(point: ai.musaz.h1score.core.GeoPoint, id: String,
+                participant: Application = app)=ChallengeViewModel(participant).apply {
                 receiveVehicle(parkedVehicle().copy(destination="사용자가 고른 목적지",destinationId=id,
                     destinationPoint=point,destinationAt=SystemClock.elapsedRealtime(),remainingM=12000.0))
             }
@@ -232,7 +350,8 @@ class CollectionRecordingTest {
             assertEquals("olympic-park",a.session?.venueId)
             assertEquals("poi-a",a.session?.destinationId)
             assertEquals("사용자가 고른 목적지",a.destinationName)
-            val b=model(requireNotNull(venue.point),"poi-b")
+            // Compare two participants, not a second same-day entry by the first driver.
+            val b=model(requireNotNull(venue.point),"poi-b",isolatedApplication())
             b.accept(round)
             assertEquals(a.session?.competitionId,b.session?.competitionId)
             val outside=model(ai.musaz.h1score.core.GeoPoint(37.5547,126.9707),"seoul-station")
@@ -281,7 +400,10 @@ class CollectionRecordingTest {
         val app=isolatedApplication()
         app.prefs.edit().putInt("balance",100).commit()
         val model=ui.runOnIdle { ChallengeViewModel(app).apply {
-            receiveVehicle(parkedVehicle());switchSource();navigate(Screen.WALLET)
+            receiveVehicle(parkedVehicle())
+            switchSource()
+            receiveVehicle(LiveVehicle(speedMps = 0.0, gearPark = null, uxRestricted = false))
+            navigate(Screen.WALLET)
         } }
         ui.setContent { H1App(model) }
         ui.onNodeWithText("차곡차곡, 내 마일리지").assertIsDisplayed()
@@ -289,7 +411,8 @@ class CollectionRecordingTest {
         ui.onNodeWithText("에어컨 필터",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("엔진오일",useUnmergedTree=true).assertIsDisplayed()
         ui.onNodeWithText("나의 쿠폰함").performScrollTo().performClick()
-        ui.onNodeWithText("아직 교환한 혜택이 없어요.").assertIsDisplayed()
+        ui.onNodeWithText("시연 예시 쿠폰").assertIsDisplayed()
+        ui.onNodeWithText("AJ-7C29-4B16-8305").assertIsDisplayed()
         ui.onNodeWithText("확인").performClick()
         ui.runOnIdle {assertEquals(100,model.balance)}
         val image=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
@@ -304,31 +427,64 @@ class CollectionRecordingTest {
         ui.onNodeWithContentDescription("와이퍼 상세").performClick()
         ui.onNodeWithText("교환하기").performClick()
         ui.runOnIdle {assertEquals(20,model.balance);assertTrue("wiper" in model.redeemedRewards)}
+        val number = ui.runOnIdle { model.couponNumbers.getValue("wiper") }
+        assertTrue(number.matches(Regex("AJ-(?:[0-9A-F]{4}-){2}[0-9A-F]{4}")))
         ui.onNodeWithText("쿠폰 교환이 완료됐어요").assertIsDisplayed()
-        ui.onNode(hasText("교환 완료") and hasClickAction() and hasAnyAncestor(isDialog())).assertIsNotEnabled()
+        ui.onNode(hasText("교환 완료") and hasAnyAncestor(isDialog())).assertIsNotEnabled()
         ui.onNodeWithText("닫기").performClick()
         ui.onNodeWithContentDescription("와이퍼 상세").performClick()
-        ui.onNode(hasText("교환 완료") and hasClickAction() and hasAnyAncestor(isDialog())).assertIsNotEnabled()
+        ui.onNode(hasText("교환 완료") and hasAnyAncestor(isDialog())).assertIsNotEnabled()
         ui.runOnIdle {model.redeemDemoReward(mileageRewards.first());assertEquals(20,model.balance)}
         ui.onNodeWithText("닫기").performClick()
         ui.onNodeWithContentDescription("에어컨 필터 상세").performClick()
-        ui.onNodeWithText("마일리지가 부족해요").assertIsDisplayed()
-        ui.onNodeWithText("280 M 더 모으면 교환할 수 있어요.").assertIsDisplayed()
+        ui.onNodeWithText("마일리지가 부족해요").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("280 M 더 모으면 교환할 수 있어요.").performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("교환하기").assertIsNotEnabled()
         ui.runOnIdle {model.redeemDemoReward(mileageRewards[1]);assertEquals(20,model.balance);assertTrue("filter" !in model.redeemedRewards)}
         ui.onNodeWithText("취소").performClick()
         ui.onNodeWithText("나의 쿠폰함").performScrollTo().performClick()
         ui.onNodeWithText("와이퍼 교환").assertIsDisplayed()
         ui.onNodeWithText("시연 교환 완료").assertIsDisplayed()
+        ui.onNodeWithText(number).assertIsDisplayed()
+        ui.onNodeWithText("AJ-7C29-4B16-8305").assertIsDisplayed()
+        val couponImage = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        ui.activity.filesDir.resolve("mileage-coupon-numbers.png").outputStream().use {
+            couponImage.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        couponImage.recycle()
         ui.onNodeWithText("확인").performClick()
         ui.runOnIdle {
             assertEquals(20,model.balance)
-            assertTrue("wiper" in ChallengeViewModel(app).redeemedRewards)
+            val restored = ChallengeViewModel(app)
+            restored.receiveVehicle(parkedVehicle())
+            restored.switchSource()
+            assertTrue("wiper" in restored.redeemedRewards)
+            assertEquals(number, restored.couponNumbers["wiper"])
+            restored.switchSource()
+            assertTrue(restored.couponNumbers.isEmpty())
         }
         ui.runOnIdle {model.navigate(Screen.PROFILE)}
         ui.onAllNodes(hasText("마이페이지") and isHeading()).assertCountEquals(1)
         ui.runOnIdle {model.navigate(Screen.BADGES)}
         ui.onAllNodesWithText("배지 컬렉션").assertCountEquals(1)
+    }
+
+    @Test fun existingDemoCouponGetsAStableNumberWithoutSpendingMileage() {
+        val app = isolatedApplication()
+        app.prefs.edit().putInt("balance", 100).putStringSet("redeemed-rewards", setOf("filter")).commit()
+
+        ui.runOnIdle {
+            fun demoModel() = ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+            }
+            val first = demoModel()
+            val number = first.couponNumbers.getValue("filter")
+            val restored = demoModel()
+            assertEquals(number, restored.couponNumbers["filter"])
+            assertEquals(setOf("filter"), restored.redeemedRewards)
+            assertEquals(100, restored.balance)
+        }
     }
 
     @Test fun resultFeedbackPersistsAndScoreDialStaysSquare() {

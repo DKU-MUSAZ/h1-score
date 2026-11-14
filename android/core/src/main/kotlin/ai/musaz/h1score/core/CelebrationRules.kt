@@ -15,7 +15,7 @@ enum class DriveMood {
     }
 }
 
-data class BadgeAward(val id: String, val title: String, val description: String)
+data class BadgeAward(val id: String, val title: String, val description: String, val mileage: Int = 0)
 object BadgeRules {
     fun newAwards(valid: Boolean, destination: String, score: Int?, rank: Int?, owned: Set<String>): List<BadgeAward> {
         if(!valid || score == null) return emptyList()

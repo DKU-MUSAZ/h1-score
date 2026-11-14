@@ -1,6 +1,5 @@
 package ai.musaz.h1score
 
-import ai.musaz.h1score.core.DrivingEventType
 import ai.musaz.h1score.core.TurnVerdict
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -33,7 +32,7 @@ import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
 import kotlin.math.roundToInt
 
-internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
+internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
 
 @Composable internal fun SavedDriveDetailDialog(
     drive: CompletedDrive,
@@ -42,9 +41,10 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
 ) {
     val frameDensity = LocalDensity.current
     val title = when (section) {
-        SavedDriveDetailSection.FEEDBACK -> "운전점수 산정 내역"
-        SavedDriveDetailSection.EVENTS -> "저장된 주행 구간"
+        SavedDriveDetailSection.FEEDBACK -> if (drive.outcome == DriveOutcome.COMPLETED) "운전점수 산정 내역"
+            else if (drive.missedDeadline) "시간 초과 실격 안내" else "안전벨트 판정 내역"
         SavedDriveDetailSection.RANKING -> "참가자 순위"
+        SavedDriveDetailSection.MILEAGE -> "마일리지 적립 내역"
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         CompositionLocalProvider(LocalDensity provides frameDensity) {
@@ -68,10 +68,11 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
                                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
-                                when (section) {
+                                if (drive.outcome != DriveOutcome.COMPLETED) SavedBeltOutcomeNotice(drive)
+                                else when (section) {
                                     SavedDriveDetailSection.FEEDBACK -> SavedFeedbackDetails(drive)
-                                    SavedDriveDetailSection.EVENTS -> SavedEventDetails(drive)
                                     SavedDriveDetailSection.RANKING -> SavedRankingDetails(drive)
+                                    SavedDriveDetailSection.MILEAGE -> SavedMileageDetails(drive)
                                 }
                             }
                         }
@@ -80,6 +81,23 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
             }
         }
     }
+}
+
+@Composable internal fun SavedBeltOutcomeNotice(drive: CompletedDrive) {
+    Text(if (drive.missedDeadline) "시간 초과 실격" else drive.outcome.label,
+        fontSize = 32.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+    drive.beltOutcomeReason?.let { reason ->
+        Text(reason, fontSize = 20.sp, lineHeight = 28.sp, color = H1Style.Ink)
+    }
+    Text("이 주행은 점수와 순위를 산정하지 않으며 마일리지·배지 적립에서 제외돼요.",
+        fontSize = 18.sp, lineHeight = 28.sp, color = H1Style.Muted)
+    if (drive.participationDay != null) Text("${drive.participationDay} 참가로 기록됐어요. 실격·확인 불가도 당일 참여에 포함돼요.",
+        fontSize = 16.sp, lineHeight = 24.sp, color = H1Style.Muted)
+    Text(if (drive.missedDeadline) "대회 종료 전 도착해야 경기 결과가 인정돼요. 도착 후 주차에 걸린 시간은 도착 시각에 영향을 주지 않아요."
+    else if (drive.outcome == DriveOutcome.DISQUALIFIED)
+        "출발 전 운전석과 탑승자가 있는 조수석의 안전벨트를 확인해 주세요."
+    else "안전벨트와 주행 데이터가 확인되지 않은 구간이 있어 개인 기록으로만 보관해요.",
+        fontSize = 16.sp, lineHeight = 24.sp, color = H1Style.Muted)
 }
 
 @Composable private fun SavedFeedbackDetails(drive: CompletedDrive) {
@@ -108,12 +126,13 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
             if (report.usesDistanceBonus) {
                 val unused = report.turns.count { it.verdict == TurnVerdict.UNUSED }
                 val opposite = report.turns.count { it.verdict == TurnVerdict.MISMATCHED }
+                val late = report.turns.count { it.verdict == TurnVerdict.LATE }
                 SavedDetailPoints("가점", listOf(
                     "속도 +${scorePoints(report.speedPoints)}점 · 제한속도 이하로 달린 거리",
                     "가감속 +${scorePoints(report.accelerationPoints)}점 · 제한속도를 지키고 급가감속 없이 달린 거리",
                 ), SavedDriveDetailStyle.Good)
                 SavedDetailPoints("감점", listOf(
-                    "회전 −${scorePoints(report.turnPenalty)}점 · 방향지시등 미사용 ${unused}건, 반대 방향 ${opposite}건",
+                    "회전 −${scorePoints(report.turnPenalty)}점 · 미사용 ${unused}건, 늦은 사용 ${late}건, 반대 방향 ${opposite}건",
                 ), SavedDriveDetailStyle.Improve)
                 Text("가점은 소수 둘째 자리까지 표시해요. 최종 점수는 기본 점수에 가점을 더하고 감점을 뺀 뒤 반올림해요. 100점은 모든 배점을 채웠을 때만 받을 수 있어요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
@@ -123,11 +142,11 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
                 Text("처음 10km까지 준수 거리 1km당 +2.5점, 그중 부드러운 가감속 거리 1km당 +1.5점이에요. 짧은 주행도 실제 거리만큼 가점을 쌓아요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-                Text("회전 방향지시등 미사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점",
+                Text(if(report.scoringVersion==ai.musaz.h1score.core.ScoreEngine.VERSION)
+                    "회전 전 미사용·늦은 사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점"
+                    else "회전 방향지시등 미사용 −1점 · 반대 방향 −2점 · 주행당 최대 −10점",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-                val judgedTurns = report.turns.count { it.verdict != TurnVerdict.UNVERIFIABLE }
-                Text("판정한 회전 ${judgedTurns}건 · 판단 보류 ${report.turns.size - judgedTurns}건",
-                    fontSize = 14.sp, color = H1Style.Muted)
+                turnAssessmentLines(report).forEach { Text(it,fontSize=14.sp,lineHeight=22.sp,color=H1Style.Muted) }
                 if (report.kilometers.isNotEmpty()) {
                     Text("거리별 가점", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
                     report.kilometers.forEach { km ->
@@ -149,37 +168,6 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
                 Text("•", fontSize = 15.sp, lineHeight = 24.sp, color = H1Style.Ink)
                 Text(point, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 24.sp, color = H1Style.Ink)
             }
-        }
-    }
-}
-
-@Composable private fun SavedEventDetails(drive: CompletedDrive) {
-    val events = drive.report.events
-    Text("저장된 구간 ${events.size}건", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-    Text("시간과 거리는 기록 시작 이후의 경과 시간과 누적 유효 거리예요. 도로명이나 GPS 위치가 아닌 대략적인 구간입니다.",
-        fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
-    if (events.isEmpty()) {
-        Text("저장된 주행 구간 정보가 없어요.", fontSize = 16.sp, color = H1Style.Ink)
-    }
-    events.forEachIndexed { index, event ->
-        val accent = event.type.detailColor()
-        Column(
-            Modifier.fillMaxWidth().background(accent.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            val label = when (event.type) {
-                DrivingEventType.OVERSPEED -> "제한속도 초과"
-                DrivingEventType.RAPID_ACCELERATION -> "급가속"
-                DrivingEventType.RAPID_DECELERATION -> decelerationEventLabel(drive.report)
-            }
-            Text("${index + 1}. $label", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accent)
-            Text("${event.elapsedMs / 60000}분 ${(event.elapsedMs / 1000) % 60}초 · 약 ${String.format(Locale.KOREA, "%.1f", event.distanceM / 1000)} km 부근",
-                fontSize = 14.sp, color = H1Style.Muted)
-            Text(when (event.type) {
-                DrivingEventType.OVERSPEED -> "제한 ${event.limitKph} km/h 구간에서 ${event.toKph.roundToInt()} km/h로 주행했어요."
-                DrivingEventType.RAPID_ACCELERATION -> "${event.fromKph.roundToInt()} → ${event.toKph.roundToInt()} km/h로 빠르게 가속했어요."
-                DrivingEventType.RAPID_DECELERATION -> "${event.fromKph.roundToInt()} → ${event.toKph.roundToInt()} km/h로 빠르게 감속했어요."
-            }, fontSize = 15.sp, lineHeight = 22.sp, color = H1Style.Ink)
         }
     }
 }
@@ -216,16 +204,30 @@ internal enum class SavedDriveDetailSection { FEEDBACK, EVENTS, RANKING }
             }
         }
     }
+    SavedMileageDetails(drive)
+}
+
+@Composable private fun SavedMileageDetails(drive: CompletedDrive) {
+    val own = drive.ranking.firstOrNull { it.id == "나" }
     Surface(color = H1Style.PaleMint, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("이번에 쌓인 마일리지", fontSize = 14.sp, color = H1Style.Muted)
-            Text("+${drive.earned} M", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Text(if (drive.isHistoryExample) "시연용 예시 보상" else "이번에 쌓인 마일리지",
+                fontSize = 14.sp, color = H1Style.Muted)
+            Text("+${drive.earned + drive.badgeMileage} M", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Text("순위 보상 +${drive.earned}M · 배지 보상 +${drive.badgeMileage}M",
+                fontSize = 14.sp, color = H1Style.Ink)
             if (own != null && own.miles != drive.earned) {
-                Text("순위로 배정된 ${own.miles} M와 실제 적립된 ${drive.earned} M는 달라요. 적립에는 목적지별 하루 1회·하루 2회 한도가 적용돼요.",
+                Text("순위로 배정된 ${own.miles} M와 실제 적립된 ${drive.earned} M는 달라요. 하루 한 경기만 인정하며 같은 경기 보상은 한 번만 지급해요.",
                     fontSize = 14.sp, lineHeight = 22.sp, color = H1Style.Muted)
             }
         }
     }
+    drive.awardedBadges.forEach { badge ->
+        Text("${badge.title} · 획득 보상 +${badge.mileage}M", fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold, color = H1Style.Ink)
+    }
+    if (!drive.demo && drive.ranking.isEmpty()) Text("실제 순위 정산은 아직 연결되지 않았어요. 경기 보상과 배지 보상은 구분해 기록해요.",
+        fontSize = 16.sp, lineHeight = 24.sp, color = H1Style.Muted)
     Text("시제품 평가 기준 · 순위 보상은 85점 이상 유효 기록에 적용 · 완료 보상 0M",
         fontSize = 12.sp, lineHeight = 18.sp, color = H1Style.Muted)
 }

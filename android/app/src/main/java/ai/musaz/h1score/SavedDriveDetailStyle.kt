@@ -11,12 +11,6 @@ internal object SavedDriveDetailStyle {
     val Improve = Color(0xFFB44941)
 }
 
-internal fun DrivingEventType.detailColor(): Color = when (this) {
-    DrivingEventType.OVERSPEED -> Color(0xFFAA5927)
-    DrivingEventType.RAPID_ACCELERATION -> Color(0xFF386BA5)
-    DrivingEventType.RAPID_DECELERATION -> Color(0xFF7858A0)
-}
-
 internal fun DrivingEventType.detailLabel(): String = when (this) {
     DrivingEventType.OVERSPEED -> "제한속도 초과"
     DrivingEventType.RAPID_ACCELERATION -> "급가속"
