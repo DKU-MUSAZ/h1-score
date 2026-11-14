@@ -109,7 +109,10 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 put("turns", JSONArray().apply { r.turns.forEach { turn -> put(JSONObject().apply {
                     put("startedAtMs", turn.startedAtMs); put("endedAtMs", turn.endedAtMs)
                     put("direction", turn.direction.name); put("verdict", turn.verdict.name)
+                    put("kind",turn.kind.name);put("reason",turn.reason.name)
+                    put("observedSignal",turn.observedSignal?.name)
                 }) } })
+                put("turnDiagnostics",JSONObject().apply { r.turnDiagnostics.forEach{(reason,count)->put(reason.name,count)} })
                 put("longitudinalEvents", JSONArray().apply { r.longitudinalEvents.forEach { event -> put(JSONObject().apply {
                     put("kind", event.kind.name); put("startedAtNanos", event.startedAtNanos)
                     put("endedAtNanos", event.endedAtNanos); put("peakAccelerationMps2", event.peakAccelerationMps2)
@@ -160,7 +163,10 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 brakingEvents = j.optInt("brakingEvents", 0),
                 turns = j.optJSONArray("turns").objects().map { turn ->
                     TurnEvent(turn.getLong("startedAtMs"), turn.getLong("endedAtMs"),
-                        TurnDirection.valueOf(turn.getString("direction")), TurnVerdict.valueOf(turn.getString("verdict")))
+                        TurnDirection.valueOf(turn.getString("direction")), TurnVerdict.valueOf(turn.getString("verdict")),
+                        runCatching{ManeuverKind.valueOf(turn.optString("kind"))}.getOrDefault(ManeuverKind.TURN),
+                        runCatching{TurnReason.valueOf(turn.optString("reason"))}.getOrDefault(TurnReason.NONE),
+                        runCatching{TurnVerdict.valueOf(turn.optString("observedSignal"))}.getOrNull())
                 },
                 longitudinalEvents = j.optJSONArray("longitudinalEvents").objects().map { event ->
                     LongitudinalEvent(LongitudinalKind.valueOf(event.getString("kind")),
@@ -174,6 +180,9 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
                 longitudinalReady = j.optBoolean("longitudinalReady", false),
                 longitudinalSampleRateHz = j.optDouble("longitudinalSampleRateHz", 0.0),
                 scoringVersion = version,
+                turnDiagnostics = TurnReason.entries.mapNotNull{reason->
+                    j.optJSONObject("turnDiagnostics")?.optInt(reason.name,0)?.takeIf{it>0}?.let{reason to it}
+                }.toMap(),
             ),
             name = j.getString("name"),
             demo = j.getBoolean("demo"),

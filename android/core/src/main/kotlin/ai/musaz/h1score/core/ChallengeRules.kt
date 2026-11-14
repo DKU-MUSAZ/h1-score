@@ -65,6 +65,7 @@ data class ScoreReport(
     val longitudinalReady: Boolean = false,
     val longitudinalSampleRateHz: Double = 0.0,
     val scoringVersion: String = LEGACY_SCORING_VERSION,
+    val turnDiagnostics: Map<TurnReason,Int> = emptyMap(),
 ) {
     // Braking is metadata on a deceleration event, never a second scored event.
     val decelerationEvents get() = brakingEvents
@@ -77,7 +78,7 @@ const val LEGACY_SCORING_VERSION = "speed70-accel30-v1"
 
 /** Prototype distance bonuses; only confirmed longitudinal events exclude smooth bonus. */
 object ScoreEngine {
-    const val VERSION = "distance-bonus-longitudinal-v2-turn-v1"
+    const val VERSION = "distance-bonus-longitudinal-v2-turn-v2"
     const val START_POINTS = 60.0
     const val SPEED_PER_KM = 2.5
     const val ACCELERATION_PER_KM = 1.5

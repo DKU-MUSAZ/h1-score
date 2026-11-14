@@ -92,9 +92,11 @@ internal class PleosSeatReader(context: Context, private val onUnavailable: () -
         readRaw(PleosPropertyIds.SEAT_BELT_BUCKLED.name, areaMask(area),
             { onResult(PleosSeatValueDecoder.buckle(it)) }, onFailed)
 
-    /** Seat-only raw values are exposed for capability diagnostics and hardware verification. */
+    /** Allowlisted read-only values; hazard state has no typed accessor in Vehicle 2.3.2. */
     fun readRaw(property: String, areaId: Int, onResult: (String?) -> Unit, onFailed: (Exception) -> Unit) = onMain {
-        if (property !in setOf(PleosPropertyIds.SEAT_OCCUPANCY.name, PleosPropertyIds.SEAT_BELT_BUCKLED.name) || areaId <= 0) {
+        val allowed = if(property=="HAZARD_LIGHTS_STATE") areaId==0 else
+            property in setOf(PleosPropertyIds.SEAT_OCCUPANCY.name, PleosPropertyIds.SEAT_BELT_BUCKLED.name) && areaId>0
+        if (!allowed) {
             onFailed(IllegalArgumentException("Unsupported seat property or area"))
             return@onMain
         }

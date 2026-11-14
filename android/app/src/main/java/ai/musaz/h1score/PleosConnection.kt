@@ -64,8 +64,9 @@ data class LiveVehicle(
     val passengerBelt: Boolean? = null, val passengerBeltAt: Long = 0,
     val beltWarningOffAt: Long? = null, val brake: Boolean? = null, val brakeAt: Long = 0,
     val turnSignal: String? = null, val turnAt: Long = 0,
+    val hazardOn: Boolean? = null, val hazardAt: Long = 0,
     val gps: GpsFix? = null, val forward: Boolean? = null,
-    // Vehicle 2.3.2 forwards PERF_STEERING_ANGLE: front-wheel degrees, left negative.
+    // Raw Pleos steering-wheel angle. Console tests on Connect 2.1 observed left positive.
     val steeringDeg: Double? = null, val steeringAt: Long = 0,
     val instruction: TurnDirection? = null, val instructionDistanceM: Double? = null, val instructionAt: Long = 0,
     val odometer: Float? = null, val odometerAt: Long = 0,
@@ -81,10 +82,12 @@ data class LiveVehicle(
         else -> null
     }, gearAt, motionSpeedMps, motionSpeedAt, belt, beltAt,
         passengerOccupied, passengerOccupiedAt, passengerBelt, passengerBeltAt)
-    fun turnObservation(now: Long) = TurnObservation(now,gps,freshSpeed(now),forward==true,
-        steeringDeg.takeIf { now-steeringAt in 0..1500 },
+    fun turnObservation(now: Long) = TurnObservation(now,gps,
+        speedMps.takeIf { now-speedAt in 0..750 },forward==true && now-gearAt in 0..2500,
+        steeringDeg.takeIf { now-steeringAt in 0..750 }?.unaryMinus(),
         turnSignal.takeIf { now-turnAt in 0..1500 }?.let { runCatching { SignalState.valueOf(it) }.getOrNull() },
-        instruction,instructionDistanceM,instructionAt)
+        instruction,instructionDistanceM,instructionAt,turnAt,steeringAt,
+        hazardOn.takeIf { now-hazardAt in 0..750 })
     val parked: Boolean get() = isParked(SystemClock.elapsedRealtime())
     fun isParked(now: Long) = now-speedAt in 0..2500 && gearPark == true && uxRestricted == false && speedMps?.let { it < .1 } == true
     fun freshBelt(now: Long): Boolean? = belt.takeIf { now - beltAt in 0..2500 } ?:
@@ -710,12 +713,35 @@ class PleosConnection(private val context: Context) {
         override fun run() {
             if(!active)return
             vehicle?.let { v ->
+                val epoch=generation
+                val requestedAt=SystemClock.elapsedRealtime()
+                seatReader.readRaw("HAZARD_LIGHTS_STATE",0,{ raw ->
+                    withCurrentVehicle(v,epoch) {
+                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.hazardAt))
+                            updateState { it.copy(hazardOn=decodeHazard(raw),hazardAt=requestedAt) }
+                    }
+                }, { withCurrentVehicle(v,epoch) {
+                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.hazardAt))
+                        updateState { it.copy(hazardOn=null,hazardAt=requestedAt) }
+                } })
                 if(turnReady) runCatching { v.getTurnSignal().getCurrentTurnSignalState({ t ->
-                    if(active && vehicle===v)updateState { it.copy(turnSignal=t?.name,turnAt=SystemClock.elapsedRealtime()) }
-                }, { if(vehicle===v)updateState { it.copy(turnSignal=null) } }) }
+                    withCurrentVehicle(v,epoch) {
+                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.turnAt))
+                            updateState { it.copy(turnSignal=t?.name,turnAt=requestedAt) }
+                    }
+                }, { withCurrentVehicle(v,epoch) {
+                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.turnAt))
+                        updateState { it.copy(turnSignal=null,turnAt=requestedAt) }
+                } }) }
                 if(steeringReady) runCatching { v.getSteeringWheel().getCurrentSteeringWheelAngle({ angle ->
-                    if(active && vehicle===v)updateState { it.copy(steeringDeg=angle?.toDouble(),steeringAt=SystemClock.elapsedRealtime()) }
-                }, { if(vehicle===v)updateState { it.copy(steeringDeg=null) } }) }
+                    withCurrentVehicle(v,epoch) {
+                        if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.steeringAt))
+                            updateState { it.copy(steeringDeg=angle?.toDouble(),steeringAt=requestedAt) }
+                    }
+                }, { withCurrentVehicle(v,epoch) {
+                    if(acceptTurnReply(requestedAt,SystemClock.elapsedRealtime(),flow.value.steeringAt))
+                        updateState { it.copy(steeringDeg=null,steeringAt=requestedAt) }
+                } }) }
             }
             main.postDelayed(this,250)
         }

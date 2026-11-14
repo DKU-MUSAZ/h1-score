@@ -495,12 +495,12 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()
-    private val turnDetector = TurnDetector()
+    private val turnDetector = ManeuverMonitor()
     private val beltMonitor = SeatBeltMonitor()
     internal var beltDecision by mutableStateOf(BeltDecision(BeltVerdict.SAFE)); private set
     private var lastTurnAt = 0L
     private fun currentReport(): ScoreReport {
-        val measured=ScoreEngine.evaluate(samples, turnDetector.events)
+        val measured=ScoreEngine.evaluate(samples, turnDetector.events).copy(turnDiagnostics=turnDetector.diagnostics)
         return if (!demo && !consoleTest && (beltDecision.hadUnverifiedMotion ||
                 beltDecision.verdict != BeltVerdict.SAFE)) measured.copy(score=null, valid=false) else measured
     }
@@ -813,12 +813,13 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             session=s.changeDestination(v.destinationId); notice="목적지가 변경되어 이번 기록을 종료했어요"; endService(); return
         }
         if (phase == Phase.RECORDING && now - lastTurnAt >= 200) {
-            if (v.freshBelt(now) == true) turnDetector.accept(v.turnObservation(now)) else turnDetector.interrupt()
+            turnDetector.accept(v.turnObservation(now))
             lastTurnAt = now
         }
         if (v.arrived && v.arrivedAt != null && v.destinationId == s.destinationId) {
             // Include pending samples before arrival closes the recording phase.
             drainRecordingSamples(now * 1_000_000L)
+            turnDetector.interrupt()
             progressReport=currentReport()
             recordingStartedAtNanos=null
             liveArrivalAt = v.arrivedAt
