@@ -176,7 +176,7 @@ internal enum class SavedDriveDetailSection { FEEDBACK, RANKING, MILEAGE }
     val ranking = drive.ranking
     val own = ranking.firstOrNull { it.id == "나" }
     val comparison = when {
-        !drive.demo -> "이 주행은 개인 기록이에요. 비교할 참가자 순위가 없어요."
+        !drive.demo && ranking.isEmpty() -> "이 주행은 개인 기록이에요. 비교할 참가자 순위가 없어요."
         drive.missedDeadline -> "마감 이후에 도착해 개인 기록만 표시해요."
         ranking.isEmpty() -> "순위에 필요한 거리·데이터 조건을 채우지 못했어요."
         else -> "같은 회차 시연 기록 · 참가자 ${ranking.size}명"

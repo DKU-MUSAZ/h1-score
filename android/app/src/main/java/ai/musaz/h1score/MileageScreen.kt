@@ -49,7 +49,7 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
     var usage by remember { mutableStateOf(false) }
     var showCoupons by remember { mutableStateOf(false) }
     val next=mileageRewards.firstOrNull {it.id !in vm.redeemedRewards}
-    val available=if (vm.demo) mileageRewards.count {it.cost<=vm.balance && it.id !in vm.redeemedRewards} else 0
+    val available=if (vm.canPreviewCouponExchange) mileageRewards.count {it.cost<=vm.balance && it.id !in vm.redeemedRewards} else 0
     LaunchedEffect(vm.parked) {if(!vm.parked) {selected=null;showOilVoucher=false;usage=false;showCoupons=false}}
     Row(Modifier.fillMaxSize(),horizontalArrangement=Arrangement.spacedBy(22.dp)) {
         Surface(Modifier.width(292.dp).heightIn(max=660.dp),color=H1Style.Ink,shape=RoundedCornerShape(26.dp)) {
@@ -59,7 +59,7 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
                     Text(mileage(vm.balance),color=Color.White,fontSize=48.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1.5).sp)
                     Text(" M",color=H1Style.Mint,fontSize=24.sp,modifier=Modifier.padding(bottom=7.dp))
                 }
-                Text(if (vm.demo) "시연 잔액" else "보유 마일리지",color=Color(0xFFCAD8E5),fontSize=12.sp)
+                Text(if (vm.canPreviewCouponExchange) "시연 잔액" else "보유 마일리지",color=Color(0xFFCAD8E5),fontSize=12.sp)
                 Box(Modifier.fillMaxWidth().height(210.dp).padding(vertical=10.dp),contentAlignment=Alignment.Center) {
                     // Size by height to account for the artwork's transparent side margins.
                     Image(painterResource(R.drawable.musaz_mileage),null,
@@ -70,13 +70,13 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
                 Surface(color=Color(0xFF294A65),shape=RoundedCornerShape(16.dp)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp)) {
                         val status = when {
-                            !vm.demo -> "쿠폰 교환 준비 중"
+                            !vm.canPreviewCouponExchange -> "쿠폰 교환 준비 중"
                             available > 0 -> "지금 교환 가능한 혜택 ${available}개"
                             next != null -> "${visual(next).name}까지 한 걸음씩"
                             else -> "모든 시연 혜택을 받았어요"
                         }
                         Text(status,color=Color.White,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
-                        if(vm.demo && next!=null && available==0) {
+                        if(vm.canPreviewCouponExchange && next!=null && available==0) {
                             Text("${mileage((next.cost-vm.balance).coerceAtLeast(0))} M 더 모으면 돼요",color=H1Style.Mint,fontSize=13.sp,modifier=Modifier.padding(top=6.dp))
                             LinearProgressIndicator(progress={(vm.balance.toFloat()/next.cost).coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().padding(top=10.dp),color=H1Style.Mint,trackColor=Color(0xFF46637B))
                         }
@@ -98,7 +98,7 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
             }
             Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 mileageRewards.forEach { reward ->
-                    RewardCard(reward,vm.balance,reward.id in vm.redeemedRewards,vm.parked,vm.demo,Modifier.fillMaxWidth()) {selected=reward}
+                    RewardCard(reward,vm.balance,reward.id in vm.redeemedRewards,vm.parked,vm.canPreviewCouponExchange,Modifier.fillMaxWidth()) {selected=reward}
                 }
             }
             Surface(onClick={usage=true},enabled=vm.parked,color=Color.White,shape=RoundedCornerShape(18.dp)) {
@@ -123,10 +123,10 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
                     Text("나의 쿠폰함",fontSize=32.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink,modifier=Modifier.weight(1f))
                     Text("보유 혜택 ${received.size}개",fontSize=18.sp,color=H1Style.Muted)
                 }
-                Text(if (vm.demo) "교환한 쿠폰과 시연 예시를 확인할 수 있어요." else "실제 쿠폰 교환은 제휴가 확정되면 이용할 수 있어요.",
+                Text(if (vm.canPreviewCouponExchange) "교환한 쿠폰과 시연 예시를 확인할 수 있어요." else "실제 쿠폰 교환은 제휴가 확정되면 이용할 수 있어요.",
                     fontSize=18.sp,lineHeight=28.sp,color=H1Style.Muted)
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-                    if (!vm.demo && received.isEmpty()) {
+                    if (!vm.canPreviewCouponExchange && received.isEmpty()) {
                         Text("아직 교환한 혜택이 없어요.",fontSize=24.sp,lineHeight=34.sp,color=H1Style.Ink,modifier=Modifier.padding(vertical=32.dp))
                     }
                     received.forEach { reward ->
@@ -161,7 +161,7 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
         val style=visual(reward)
         MileageDialog(onDismissRequest={selected=null}) {
             val title = when {
-                !vm.demo -> "${style.name} 쿠폰"
+                !vm.canPreviewCouponExchange -> "${style.name} 쿠폰"
                 received -> "쿠폰 교환이 완료됐어요"
                 else -> "${style.name} 쿠폰을 교환하시겠습니까?"
             }
@@ -173,7 +173,7 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
                 }
                 Text("필요 ${mileage(reward.cost)} M · 내 잔액 ${mileage(vm.balance)} M",fontSize=26.sp,lineHeight=36.sp,fontWeight=FontWeight.Bold,color=H1Style.Ink)
                 when {
-                    !vm.demo -> Text("쿠폰 교환은 시연 모드에서 체험할 수 있어요.",
+                    !vm.canPreviewCouponExchange -> Text("쿠폰 교환은 시연 모드에서 체험할 수 있어요.",
                         fontSize=22.sp,lineHeight=32.sp,color=H1Style.Ink)
                     received -> Text("이미 교환한 쿠폰이에요. 나의 쿠폰함에서 확인해 주세요.",
                         fontSize=22.sp,lineHeight=32.sp,fontWeight=FontWeight.SemiBold,color=H1Style.Ink)
@@ -186,13 +186,13 @@ private const val SampleCouponNumber = "AJ-7C29-4B16-8305"
                     else -> Text("교환하면 ${mileage(reward.cost)} M가 차감돼요.",
                         fontSize=22.sp,lineHeight=32.sp,color=H1Style.Ink)
                 }
-                if (vm.demo) Text("시연 교환 · 실제 정비 쿠폰은 발급되지 않아요.",fontSize=18.sp,lineHeight=28.sp,color=H1Style.Muted)
+                if (vm.canPreviewCouponExchange) Text("시연 교환 · 실제 정비 쿠폰은 발급되지 않아요.",fontSize=18.sp,lineHeight=28.sp,color=H1Style.Muted)
             }
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                 OutlinedButton(onClick={selected=null},modifier=Modifier.weight(1f).height(56.dp),shape=RoundedCornerShape(15.dp)) {
-                    Text(if(received || !vm.demo) "닫기" else "취소",fontSize=20.sp,fontWeight=FontWeight.Bold)
+                    Text(if(received || !vm.canPreviewCouponExchange) "닫기" else "취소",fontSize=20.sp,fontWeight=FontWeight.Bold)
                 }
-                if (vm.demo) Button(onClick={vm.redeemDemoReward(reward)},enabled=!received && short==0 && vm.parked,
+                if (vm.canPreviewCouponExchange) Button(onClick={vm.redeemDemoReward(reward)},enabled=!received && short==0 && vm.parked,
                     modifier=Modifier.weight(2f).height(56.dp),shape=RoundedCornerShape(15.dp)) {
                     Text(if(received) "교환 완료" else "교환하기",fontSize=20.sp,fontWeight=FontWeight.Bold)
                 }

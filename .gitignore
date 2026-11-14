@@ -16,3 +16,6 @@ local.properties
 *.keystore
 *.apk
 *.aab
+
+# Local recording takes, temporary exports, and profile backups
+outputs/

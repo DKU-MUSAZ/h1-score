@@ -36,7 +36,7 @@ private const val WorkShortcutKey = "destination-shortcut-work"
 enum class Screen { HOME, JOURNEY, RESULT, WALLET, BADGES, HISTORY, CONNECTION, PROFILE }
 
 class ChallengeViewModel @JvmOverloads constructor(app: Application,
-    preferenceName: String = "h1-demo-v1", private val clock: () -> Instant = { Instant.now() },
+    preferenceName: String = appPreferenceName, private val clock: () -> Instant = { Instant.now() },
 ): AndroidViewModel(app) {
     val connection = PleosConnection(app)
     var live by mutableStateOf(LiveVehicle()); private set
@@ -506,8 +506,10 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     ): List<BadgeAward> = newlyEarnedCollectionBadges(previous, previousRanks, progress, ranks)
         .filter { ledger.creditBadge(it.id, it.mileage) > 0 }
 
+    internal val canPreviewCouponExchange get() = demo || (BuildConfig.DEBUG && BuildConfig.FILMING_BUILD)
+
     internal fun redeemDemoReward(reward: MileageReward) {
-        if (!demo || !parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
+        if (!canPreviewCouponExchange || !parked || reward.id in redeemedRewards || !ledger.spend(reward.cost)) return
         val number = newCouponNumber()
         balance = ledger.balance
         redeemedRewards = redeemedRewards + reward.id
@@ -559,6 +561,18 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             dismissedRouteInvitation = null
         }
         live=next
+        if (connection.rehearsalEnabled && rehearsalPendingPark && next.parked) {
+            rehearsalPendingPark=false
+            screen=Screen.RESULT
+            if(voiceEnabled) voice.say("주행이 종료됐어요. 안전벨트 미착용으로 실격됐어요. 무사즈에서 주행 결과를 확인해 주세요.")
+            RecordingService.notifyResult(getApplication())
+            val finishedSessionId = session?.id
+            viewModelScope.launch {
+                delay(12_000)
+                if (session?.id == finishedSessionId && !activeJourney &&
+                    !awaitingMapRoute && trackedSpot == null && !rehearsalPendingPark) endService()
+            }
+        }
         // Console tests use real speed with explicit test limit/belt assumptions. Navigation,
         // turn, collection and belt-disqualification events must not settle a test as a trip.
         if (consoleTest && activeJourney) return
@@ -579,7 +593,7 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         val start = recordingStartedAtNanos ?: return
         if (sample.speedTimestampNanos < start) return
         // Keep invalid, duplicate and reversed samples as barriers to continuous detection.
-        samples += if (consoleTest) sample.copy(limitKph = consoleSessionLimitKph) else sample
+        samples += if (consoleTest) sample.copy(limitKph = consoleSessionLimitKph) else if (BuildConfig.FILMING_BUILD && connection.rehearsalEnabled) sample.copy(limitKph = sample.limitKph ?: 80) else sample
         if (receivedAt - lastReportAt >= 500) {
             progressReport = currentReport()
             if (consoleTest) {
@@ -699,12 +713,15 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         screen=Screen.RESULT
     }
     fun enterForeground() { uiVisible=true; connection.start(); if (voiceEnabled) voice.start() }
-    fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute && trackedSpot == null) { connection.stop(); voice.stop() } }
+    fun leaveForeground() { uiVisible=false; if(!activeJourney && !awaitingMapRoute && trackedSpot == null && !rehearsalPendingPark && !connection.rehearsalEnabled) { connection.stop(); voice.stop() } }
     private fun endService() {
         getApplication<Application>().stopService(android.content.Intent(getApplication(), RecordingService::class.java))
-        if(!uiVisible) { connection.stop(); voice.stop() }
+        if(!uiVisible && !rehearsalPendingPark) {
+            if(connection.rehearsalEnabled) viewModelScope.launch { delay(12_000); if(!activeJourney && !awaitingMapRoute && trackedSpot == null && !rehearsalPendingPark && !uiVisible) { connection.stop(); voice.stop() } }
+            else { connection.stop(); voice.stop() }
+        }
     }
-    fun serviceEnded() { if(!uiVisible && !activeJourney && !awaitingMapRoute && trackedSpot == null) connection.stop() }
+    fun serviceEnded() { if(!uiVisible && !activeJourney && !awaitingMapRoute && trackedSpot == null && !rehearsalPendingPark && !connection.rehearsalEnabled) connection.stop() }
     private fun beginService(): Boolean = runCatching {
         getApplication<Application>().startForegroundService(android.content.Intent(getApplication(), RecordingService::class.java))
         true
@@ -828,6 +845,53 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             demoRunning=false
         }
     }
+    private var rehearsalDistanceSessionId: String? = null
+    private var rehearsalPendingPark = false
+    internal fun rehearseNavigation(event: String): String {
+        if (!BuildConfig.DEBUG || android.os.Build.HARDWARE != "ranchu" ||
+            !android.os.Build.DEVICE.startsWith("crp_avd")) return "Pleos debug emulator required"
+        if (event == "configuration") return "filming=${BuildConfig.FILMING_BUILD} profile=$appPreferenceName"
+        if (event == "status") return "phase=$phase parked=$parked belt=${live.belt} passenger=${live.passengerOccupied} gear=${live.gearCode} speed=${live.motionSpeedMps} beltDecision=$beltDecision"
+        if (event == "enable" && parked && !activeJourney) {
+            connection.rehearsalEnabled = true
+            if (!voiceEnabled) { voiceEnabled=true; voice.start() }
+            return "Rehearsal enabled: console telltale belt; real speed; navigation signals manual"
+        }
+        if (event == "announce-saved-result") {
+            if (!BuildConfig.FILMING_BUILD || !connection.rehearsalEnabled || !parked || activeJourney)
+                return "Parked filming rehearsal required"
+            val saved = completedDriveStore.read() ?: return "No saved result"
+            if (saved.session.id.startsWith("fixed-history")) return "A recorded rehearsal result is required"
+            voice.start()
+            voice.say(if (saved.outcome == DriveOutcome.DISQUALIFIED)
+                "주행이 종료됐어요. 안전벨트 미착용으로 실격됐어요. 무사즈에서 주행 결과를 확인해 주세요."
+                else "무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
+            RecordingService.notifyResult(getApplication())
+            return "Reannounced saved result: ${saved.session.id}; no settlement changes"
+        }
+        val current=session ?: return "Start a Pleos challenge first"
+        if (demo || consoleTest || !connection.rehearsalEnabled || live.destinationId != current.destinationId || live.routeCancelled)
+            return "Active Pleos rehearsal route required"
+        val now=SystemClock.elapsedRealtime()
+        when(event) {
+            "10km", "10km-live" -> {
+                if(phase!=Phase.RESERVED) return "The challenge must be waiting for the last 10 km"
+                rehearsalDistanceSessionId=current.id
+                consumeLive(live,now)
+                if (BuildConfig.FILMING_BUILD && event == "10km" && phase == Phase.RECORDING) {
+                    // Clearly labelled filming fixture: 9 km before the real console segment.
+                    samples.addAll(filmingApproachSamples(now))
+                }
+            }
+            "arrive" -> {
+                if(phase!=Phase.RECORDING) return "The challenge must be recording"
+                consumeLive(live.copy(arrived=true,arrivedAt=Instant.now()),now)
+            }
+            else -> return "Use enable, 10km or arrive"
+        }
+        return "Challenge phase: $phase"
+    }
+
     private fun consumeLive(v: LiveVehicle, now: Long) {
         val s=session ?: return
         if(!activeJourney) return
@@ -863,7 +927,8 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             if (phase == Phase.FINISHED) finish(liveArrivalAt)
             return
         }
-        val remaining=v.remainingM?.takeIf { now-v.destinationAt <=10_000 } ?: return
+        val remaining=if (rehearsalDistanceSessionId == s.id) 10_000.0 else
+            v.remainingM?.takeIf { now-v.destinationAt <=10_000 } ?: return
         remainingM=remaining
         session=s.update(remaining,false,v.parked)
         if (s.phase != Phase.RECORDING && phase == Phase.RECORDING) recordingStartedAtNanos = now * 1_000_000L
@@ -923,7 +988,7 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
                 collectionProgress = progress
             }
         }
-        if(demo && accepted) {
+        if((demo || (BuildConfig.DEBUG && BuildConfig.FILMING_BUILD)) && accepted) {
             // Popularity is a venue-wide count; prototype settlement uses a five-person group.
             val fixtures = listOf(
                 Entry("느긋한 고래", 92) to GeoPoint(37.528, 126.934),
@@ -935,7 +1000,8 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
             val peers = if (selected.name == "여의도한강공원") {
                 fixtures.filter { (_, point) -> hangangVenue.includes(point) }
             } else fixtures.take(selected.demoPeers)
-            ranking = Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
+            ranking = if (!demo) filmingRanking(requireNotNull(r.score))
+                else Settlement.rank(listOf(Entry("나", requireNotNull(r.score))) + peers.take(4).map { it.first })
             val allocation=ranking.first { it.id=="나" }.miles
             earned=ledger.credit(s.id,allocation,s.destinationId,requireNotNull(participationDay).toString())
             if(allocation>0 && earned==0) notice="이미 정산된 경기 또는 참가일의 보상이에요. 중복 지급하지 않아요."
@@ -951,7 +1017,7 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         ownedBadges = ownedBadges + legacyAwards.map { it.id }
         editor.putStringSet(if (demo) "badges-demo" else "badges-live", ownedBadges)
         writeMileage(editor)
-        if (voiceEnabled && uiVisible && parked)
+        if (voiceEnabled && (uiVisible || connection.rehearsalEnabled) && parked)
             voice.say("무사히 도착했어요. 무사즈에서 주행 결과를 확인해 주세요.")
         completedDestinationName=destinationName
         completedDriveStore.save(result.copy(ranking=ranking, earned=earned, badgeMileage=badgeMileageEarned,
@@ -966,7 +1032,12 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     }
     private fun checkSeatBelts(v: LiveVehicle, now: Long): Boolean {
         if (!activeJourney) return false
-        connection.drainBeltObservations().forEach { beltMonitor.accept(it) }
+        connection.drainBeltObservations().forEach {
+            val before = beltMonitor.decision
+            val after = beltMonitor.accept(it)
+            if (BuildConfig.DEBUG && !before.hadUnverifiedMotion && after.hadUnverifiedMotion)
+                android.util.Log.d("H1BeltTrace", "First unverified: $it")
+        }
         beltDecision=beltMonitor.accept(v.beltObservation(now))
         if (beltDecision.hadUnverifiedMotion || beltDecision.verdict != BeltVerdict.SAFE)
             progressReport=progressReport.copy(score=null, valid=false)
@@ -999,7 +1070,8 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         notice=if (outcome == DriveOutcome.DISQUALIFIED) "${reason.label}으로 실격 처리됐어요. 주차 후 내 기록에서 확인해 주세요."
             else "주행 중 안전벨트 확인에 필요한 정보가 부족해 이번 점수·순위·보상을 집계하지 않았어요."
         if (parked) { screen=Screen.RESULT; RecordingService.notifyResult(getApplication()) }
-        endService()
+        if(connection.rehearsalEnabled && !parked && outcome==DriveOutcome.DISQUALIFIED) rehearsalPendingPark=true
+        else endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.setConsoleCapture(false); connection.stop(); voice.stop() }
 }
