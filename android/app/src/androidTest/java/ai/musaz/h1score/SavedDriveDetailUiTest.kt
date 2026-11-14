@@ -43,18 +43,21 @@ class SavedDriveDetailUiTest {
         ui.setContent { MinimumDetailFrame(saved) }
 
         capture("busy")
-        listOf("운전 습관 요약", "과속", "급가속", "급감속", "방향지시등", "이어갈 습관", "개선할 점")
+        listOf("운전 습관 요약", "과속", "급가속", "급감속", "방향지시등")
             .forEach { ui.onNodeWithText(it).assertIsDisplayed() }
-        ui.onNodeWithText("속도 가점 +21.92점").assertIsDisplayed()
-        ui.onAllNodesWithText("가감속 공통 +12.40점").assertCountEquals(1)
-        ui.onNodeWithText("감점 −3.00점").assertIsDisplayed()
+        ui.onNodeWithText("속도 가점 +21.92점").assertDoesNotExist()
+        ui.onAllNodesWithText("가감속 공통 +12.40점").assertCountEquals(0)
+        ui.onNodeWithText("감점 −3.00점").assertDoesNotExist()
+        ui.onNodeWithText("해당 구간 가점 제외").assertDoesNotExist()
+        ui.onNodeWithText("급가속 발생 횟수").assertIsDisplayed()
+        ui.onNodeWithText("급감속 발생 횟수").assertIsDisplayed()
         ui.onNodeWithText("주행 구간", substring = true).assertDoesNotExist()
         listOf(
             "점수 자세히 보기" to "운전점수 산정 내역",
             "순위 자세히 보기" to "참가자 순위",
             "마일리지 자세히 보기" to "마일리지 적립 내역",
         ).forEach { (button, title) ->
-            ui.onNodeWithText(button).performClick()
+            ui.onNodeWithContentDescription(button).performClick()
             assertDialogAndClose(title)
         }
     }

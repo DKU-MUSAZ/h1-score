@@ -13,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -74,7 +76,7 @@ internal fun SavedDriveDetailScreen(drive: CompletedDrive, onBack: () -> Unit) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             SavedDriveSummaryColumn("주행습관 점수", "점수 자세히 보기", Modifier.weight(1f),
                                 onClick = { details = SavedDriveDetailSection.FEEDBACK }) {
-                                ScoreDial(report.score, H1Style.Ink, Modifier.size(160.dp), numberSize = 60.sp,
+                                ScoreDial(report.score, H1Style.Ink, Modifier.size(140.dp), numberSize = 60.sp,
                                     pendingLabel = "점수 미확정")
                             }
                             SavedDriveSummaryColumn("순위", "순위 자세히 보기", Modifier.weight(1f),
@@ -105,26 +107,8 @@ internal fun SavedDriveDetailScreen(drive: CompletedDrive, onBack: () -> Unit) {
                     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("운전 습관 요약", fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold)
-                        feedback.metrics.forEachIndexed { index, metric ->
-                            // Only distance-bonus reports share a longitudinal score.
-                            val sharedLongitudinal = report.usesDistanceBonus && index in 1..2
-                            val pointsColor = when {
-                                report.score == null -> H1Style.Muted
-                                index == 3 && report.usesDistanceBonus && report.turnPenalty > 0 -> SavedDriveDetailStyle.Improve
-                                index == 0 && (if (report.usesDistanceBonus) report.speedPoints else report.compliance) > 0 -> SavedDriveDetailStyle.Good
-                                index in 1..2 && (if (report.usesDistanceBonus) report.accelerationPoints else if (index == 1) report.smoothness else 0.0) > 0 -> SavedDriveDetailStyle.Good
-                                else -> H1Style.Muted
-                            }
-                            SavedMetricCard(metric, !sharedLongitudinal, pointsColor,
-                                Modifier.weight(if (sharedLongitudinal) 0.65f else 1f).fillMaxWidth())
-                            if (report.usesDistanceBonus && index == 2) {
-                                Text(
-                                    if (report.score == null) "가감속 공통 · 점수 미확정" else metric.points,
-                                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
-                                    fontSize = 16.sp, lineHeight = 22.sp,
-                                    fontWeight = FontWeight.SemiBold, color = pointsColor,
-                                )
-                            }
+                        feedback.metrics.forEach { metric ->
+                            SavedMetricCard(metric, Modifier.weight(1f).fillMaxWidth())
                         }
                     }
                 }
@@ -164,7 +148,7 @@ private fun SavedBeltOutcomeScreen(drive: CompletedDrive, onBack: () -> Unit) {
 
 @Composable
 private fun SavedMetricCard(
-    metric: HistoryFeedbackMetric, showPoints: Boolean, pointsColor: Color, modifier: Modifier,
+    metric: HistoryFeedbackMetric, modifier: Modifier,
 ) {
     Surface(modifier, color = H1Style.Paper, shape = RoundedCornerShape(14.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
@@ -175,12 +159,11 @@ private fun SavedMetricCard(
                 Text(metric.value, Modifier.alignByBaseline(), fontSize = 24.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight.Bold)
             }
-            Text(metric.detail, fontSize = 13.sp, lineHeight = 18.sp, color = H1Style.Muted)
-            if (showPoints) {
-                HorizontalDivider(Modifier.padding(vertical = 3.dp), color = H1Style.Line)
-                Text(metric.points, fontSize = 16.sp, lineHeight = 22.sp,
-                    fontWeight = FontWeight.SemiBold, color = pointsColor)
-            }
+            Text(when (metric.label) {
+                "급가속" -> "급가속 발생 횟수"
+                "급감속" -> "급감속 발생 횟수"
+                else -> metric.detail
+            }, fontSize = 13.sp, lineHeight = 18.sp, color = H1Style.Muted)
         }
     }
 }
@@ -190,13 +173,14 @@ private fun SavedDriveSummaryColumn(
     title: String, action: String, modifier: Modifier, onClick: () -> Unit, value: @Composable () -> Unit,
 ) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(title, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
-        Spacer(Modifier.height(16.dp))
-        Box(Modifier.fillMaxWidth().height(170.dp), contentAlignment = Alignment.Center) { value() }
-        TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)) {
-            Text(action, fontSize = 14.sp, maxLines = 1)
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(16.dp))
+        TextButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = action },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)) {
+            Text(title, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, color = H1Style.Ink)
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(18.dp))
         }
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) { value() }
     }
 }
 

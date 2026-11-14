@@ -349,7 +349,7 @@ class DriveHistoryPersistenceTest {
         assertTrue(good.top > score.bottom)
         assertTrue(improve.top > good.bottom)
         captureHistoryExample("detail")
-        ui.onNodeWithText("마일리지 자세히 보기").performClick()
+        ui.onNode(hasText("마일리지 자세히 보기") or hasContentDescription("마일리지 자세히 보기")).performClick()
         dialogText("마일리지 적립 내역").assertIsDisplayed()
         dialogText("순위 보상 +100M · 배지 보상 +15M").assertIsDisplayed()
         ui.onNodeWithContentDescription("닫기").performClick()
@@ -526,7 +526,7 @@ class DriveHistoryPersistenceTest {
         ui.onNodeWithText("공동 1위", substring = true).assertIsDisplayed()
         ui.onNodeWithText("9분 0초", substring = true).assertDoesNotExist()
 
-        ui.onNodeWithText("점수 자세히 보기").performClick()
+        ui.onNode(hasText("점수 자세히 보기") or hasContentDescription("점수 자세히 보기")).performClick()
         dialogText("운전점수 산정 내역").assertIsDisplayed()
         dialogText("기록과 점수 안내").assertIsDisplayed()
         dialogText("전체 횟수는 확인할 수 없어요", substring = true).performScrollTo().assertIsDisplayed()
@@ -535,7 +535,7 @@ class DriveHistoryPersistenceTest {
 
         ui.onNodeWithText("주행 구간 10건 보기").assertDoesNotExist()
 
-        ui.onNodeWithText("순위 자세히 보기").performClick()
+        ui.onNode(hasText("순위 자세히 보기") or hasContentDescription("순위 자세히 보기")).performClick()
         dialogText("참가자 순위").assertIsDisplayed()
         dialogText("함께 달린 무사즈").performScrollTo().assertIsDisplayed()
         dialogText("+0 M").performScrollTo().assertIsDisplayed()
@@ -648,7 +648,7 @@ class DriveHistoryPersistenceTest {
     private fun assertSavedOverviewVisible() {
         listOf("운전 습관 요약", "이어갈 습관", "개선할 점", "방향지시등",
             "점수 자세히 보기", "순위 자세히 보기").forEach {
-            ui.onNodeWithText(it).assertIsDisplayed()
+            ui.onNode(hasText(it) or hasContentDescription(it)).assertIsDisplayed()
         }
         ui.onNodeWithContentDescription("기록 목록으로").assertIsDisplayed()
     }
