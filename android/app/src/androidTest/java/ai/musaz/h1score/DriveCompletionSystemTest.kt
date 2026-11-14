@@ -34,12 +34,14 @@ class DriveCompletionSystemTest {
     private var priorSetup=false
     private var priorResult:String?=null
     private var priorHistory:String?=null
+    private var priorVoice:Boolean?=null
     @Before fun preserveUserSetup() {
         assumeTrue("Pleos device integration is opt-in", InstrumentationRegistry.getArguments().getString("liveDevice")=="true")
         val p=app.getSharedPreferences("h1-demo-v1",0)
         priorSetup=p.getBoolean("first-run-complete-v1",false)
         priorResult=p.getString("last-completed-drive-v1",null)
         priorHistory=p.getString("completed-drives-v1",null)
+        priorVoice = if (p.contains("voice")) p.getBoolean("voice", false) else null
         backupReady=true
         val accessibility=instrumentation.uiAutomation.serviceInfo
         accessibility.flags=accessibility.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
@@ -51,6 +53,7 @@ class DriveCompletionSystemTest {
         app.getSharedPreferences("h1-demo-v1",0).edit().putBoolean("first-run-complete-v1",priorSetup).apply {
             if(priorResult==null) remove("last-completed-drive-v1") else putString("last-completed-drive-v1",priorResult)
             if(priorHistory==null) remove("completed-drives-v1") else putString("completed-drives-v1",priorHistory)
+            priorVoice?.let { putBoolean("voice", it) } ?: remove("voice")
         }.commit()
     }
     private fun main(block: () -> Unit) = instrumentation.runOnMainSync(block)
@@ -80,8 +83,12 @@ class DriveCompletionSystemTest {
             assertEquals(Phase.RESERVED, vm.phase)
             assertEquals(0, vm.session?.startCount)
         }
-        main { vm.leaveForeground() }
-        SystemClock.sleep(1000)
+        main {
+            if (!vm.voiceEnabled) vm.toggleVoice()
+            assertTrue(vm.voiceEnabled)
+            vm.leaveForeground()
+        }
+        SystemClock.sleep(1500)
         main {
             vm.connection.stop()
             val threshold = route.copy(remainingM=10_000.0, destinationAt=SystemClock.elapsedRealtime(), gearPark=false)
@@ -89,11 +96,20 @@ class DriveCompletionSystemTest {
             assertEquals(Phase.RECORDING, vm.phase)
             vm.receiveVehicle(threshold.copy(remainingM=9_999.0))
             assertEquals(1, vm.session?.startCount)
-            vm.receiveVehicle(threshold.copy(arrived=true, arrivedAt=Instant.now()))
+        }
+        // Leave time for the background utterance to finish before ending the service.
+        SystemClock.sleep(7_000)
+        main {
+            val now = SystemClock.elapsedRealtime()
+            vm.receiveVehicle(route.copy(gearPark=false, speedAt=now, beltAt=now,
+                arrived=true, arrivedAt=Instant.now()))
             assertEquals(Phase.AWAITING_PARK, vm.phase)
         }
         assertFalse(manager.activeNotifications.any { it.id == 11 })
-        main { vm.receiveVehicle(route.copy(arrived=true, arrivedAt=Instant.now())) }
+        main {
+            val now = SystemClock.elapsedRealtime()
+            vm.receiveVehicle(route.copy(speedAt=now, beltAt=now, arrived=true, arrivedAt=Instant.now()))
+        }
         waitFor("Completion notification was not posted") { manager.activeNotifications.any { it.id == 11 } }
         val completion = manager.activeNotifications.single { it.id == 11 }
         assertNotNull(completion.notification.contentIntent)
@@ -102,16 +118,18 @@ class DriveCompletionSystemTest {
         device.openNotification()
         device.waitForIdle()
         device.dumpWindowHierarchy(File(app.filesDir, "completion-notification.xml"))
-        device.takeScreenshot(File(app.filesDir, "completion-notification.png"))
         if(InstrumentationRegistry.getArguments().getString("manualNotificationTap")=="true") {
+            device.takeScreenshot(File(app.filesDir, "completion-notification.png"))
             instrumentation.sendStatus(2,android.os.Bundle().apply {putString("stream","MANUAL_READY: tap the visible 결과 보기 action.\n")})
         } else if(InstrumentationRegistry.getArguments().getString("pleosNotificationLayout")=="true") {
             // Observed OEM overlay is rendered on display 0; accessibility may expose a stale/different window.
             assertEquals(1920,device.displayWidth);assertEquals(1080,device.displayHeight)
+            device.takeScreenshot(File(app.filesDir, "completion-notification.png"))
             device.click(960,264)
         } else {
             val result=device.wait(Until.findObject(By.text("결과 보기")),10_000)
             assertNotNull("Notification action must be accessible",result)
+            device.takeScreenshot(File(app.filesDir, "completion-notification.png"))
             result!!.click()
         }
         waitFor("Notification tap must open RESULT, not the previously selected screen") { vm.screen == Screen.RESULT }
@@ -120,6 +138,12 @@ class DriveCompletionSystemTest {
         assertTrue("Result screen must actually be visible after notification tap",device.wait(Until.hasObject(By.text("챌린지 결과")),15_000))
         assertEquals(Phase.FINISHED, vm.phase)
         assertFalse(manager.activeNotifications.any { it.id == 11 })
+        val wallet = device.wait(Until.findObject(By.text("마일리지")), 10_000)
+        assertNotNull("Mileage tab must be visible on the result screen", wallet)
+        wallet!!.click()
+        waitFor("Mileage tab must open the wallet") { vm.screen == Screen.WALLET }
+        assertTrue(device.wait(Until.hasObject(By.text("차곡차곡, 내 마일리지")), 10_000))
+        device.takeScreenshot(File(app.filesDir, "completion-mileage.png"))
     }
 
     @Test fun actualNativeSearchReceivesKeyword() {

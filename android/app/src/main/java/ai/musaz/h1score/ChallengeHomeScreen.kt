@@ -1,12 +1,15 @@
 package ai.musaz.h1score
 
 import ai.musaz.h1score.core.ChallengeRound
+import ai.musaz.h1score.core.SavedPlace
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.util.Locale
 
@@ -64,10 +68,27 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     val keyboard = LocalSoftwareKeyboardController.current
     val canChoose = vm.canChooseDestination
     var navigationQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    var shortcutLookup by rememberSaveable { mutableStateOf(false) }
+    var selectedPlace by remember { mutableStateOf<SavedPlace?>(null) }
+    val keyword = query.trim().takeIf { searching && !showMap && !editingShortcuts && canChoose }.orEmpty()
+    var suggestions by remember(keyword) { mutableStateOf<List<PlaceSearchResult>?>(null) }
+    LaunchedEffect(keyword) {
+        if (keyword.isEmpty()) return@LaunchedEffect
+        delay(350)
+        suggestions = findPlaces(keyword)
+    }
+
+
 
     fun hideKeyboard() {
         keyboard?.hide()
         focus.clearFocus(force = true)
+    }
+
+    fun choosePlace(place: SavedPlace) {
+        if (!canChoose) return
+        hideKeyboard()
+        selectedPlace = place
     }
 
     fun closeSearch() {
@@ -86,8 +107,20 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
     fun openShortcut(id: String) {
         if (!canChoose) return
         val item=vm.destinationShortcuts.find { it.id==id } ?: return
-        if (item.place==null) { editShortcuts(); shortcutId=id }
-        else vm.navigateShortcut(id)
+        val savedQuery = item.searchQuery
+        if (savedQuery.isBlank()) {
+            editShortcuts()
+            shortcutId = id
+        } else {
+            hideKeyboard()
+            val resolved = item.place ?: registeredChallengePlace(savedQuery)
+            if (resolved != null) {
+                choosePlace(resolved)
+            } else {
+                shortcutLookup = true
+                navigationQuery = savedQuery
+            }
+        }
     }
 
     fun chooseSpot(spot: Destination) {
@@ -99,6 +132,10 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
 
     fun searchDestination(name: String) {
         if (!canChoose || name.isBlank()) return
+        registeredChallengePlace(name)?.let {
+            choosePlace(it)
+            return
+        }
         val key = name.filter(Char::isLetterOrDigit)
         val spot = challengeSpots.singleOrNull {
             val spotKey = it.name.filter(Char::isLetterOrDigit)
@@ -110,11 +147,12 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
             chooseSpot(spot)
         } else {
             hideKeyboard()
+            shortcutLookup = false
             navigationQuery = name.trim()
         }
     }
 
-    if (!showMap && !searching && !editingShortcuts && navigationQuery == null) {
+    if (!showMap && !searching && !editingShortcuts && navigationQuery == null && selectedPlace == null) {
         vm.routeInvitationVenue?.let { venue ->
             key(vm.live.destinationId) {
                 LiveRouteChallengeDialog(vm, vm.live.destination.orEmpty(), venue.name, vm::dismissRouteInvitation)
@@ -129,9 +167,10 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
         if (!canChoose) {
             editingShortcuts = false
             navigationQuery = null
+            selectedPlace = null
         }
     }
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (showMap) {
             TextButton(onClick = { showMap = false }) { Text("목적지 검색으로 돌아가기") }
             ChallengeMap(
@@ -141,48 +180,80 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
                 initialSpot = mapSpot
             )
         } else {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it; searching = true },
-                    modifier = Modifier.weight(1f).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
-                    enabled = canChoose,
-                    singleLine = true,
-                    shape = RoundedCornerShape(30.dp),
-                    placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 19.sp) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    trailingIcon = if (query.isNotEmpty()) {
-                        { IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "검색어 지우기") } }
-                    } else null,
-                    textStyle = LocalTextStyle.current.copy(fontSize = 19.sp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { searchDestination(query) }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        unfocusedBorderColor = H1Style.Line
-                    )
-                )
-                if (searching) TextButton(onClick = ::closeSearch) { Text("닫기", fontSize = 16.sp) }
+            val showSuggestions = keyword.isNotEmpty()
+            Surface(
+                modifier = if (showSuggestions) Modifier.fillMaxWidth().weight(1f, fill = false)
+                    else Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(30.dp),
+                color = if (showSuggestions) Color.White else Color.Transparent,
+                border = if (showSuggestions) BorderStroke(1.dp, H1Style.Line) else null,
+            ) {
+                Column {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it; searching = true },
+                            modifier = Modifier.weight(1f).heightIn(min = 80.dp).tutorialTarget("destination-search").onFocusChanged { if (it.isFocused) searching = true },
+                            enabled = canChoose,
+                            singleLine = true,
+                            shape = RoundedCornerShape(30.dp),
+                            placeholder = { Text("목적지 또는 장소를 검색해 주세요", fontSize = 25.sp) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(27.dp)) },
+                            trailingIcon = if (query.isNotEmpty()) {
+                                { IconButton(onClick = { query = "" }) { Icon(Icons.Outlined.Close, "검색어 지우기") } }
+                            } else null,
+                            textStyle = LocalTextStyle.current.copy(fontSize = 25.sp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { searchDestination(query) }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                focusedBorderColor = if (showSuggestions) Color.Transparent else H1Style.Ink,
+                                unfocusedContainerColor = Color.White,
+                                unfocusedBorderColor = if (showSuggestions) Color.Transparent else H1Style.Line
+                            )
+                        )
+                        if (searching) TextButton(onClick = ::closeSearch) { Text("닫기", fontSize = 16.sp) }
+                    }
+                    if (showSuggestions) {
+                        HorizontalDivider(color = H1Style.Line)
+                        LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 8.dp)) {
+                            items(suggestions.orEmpty()) { result ->
+                                DestinationRow(result.place.name, result.address, Icons.Outlined.LocationOn, canChoose,
+                                    stackedDetail = true) { choosePlace(result.place) }
+                            }
+                            item {
+                                if (suggestions.isNullOrEmpty()) {
+                                    Text(
+                                        if (suggestions == null) "장소를 찾고 있어요…" else "일치하는 장소가 없어요.",
+                                        Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                                        color = H1Style.Muted,
+                                    )
+                                }
+                                DestinationRow("“$keyword” 검색", null, Icons.Outlined.Search, canChoose) {
+                                    searchDestination(keyword)
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if (searching) {
+            if (searching && !showSuggestions) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     DestinationShortcutRow(vm.destinationShortcuts, canChoose, ::openShortcut, ::editShortcuts)
                     DestinationSuggestions(
                         recent = vm.recentDestinations,
-                        query = query,
                         enabled = canChoose,
                         onSearch = ::searchDestination,
                         onSpot = ::chooseSpot,
-                        onMap = { hideKeyboard(); mapSpot=null; showMap = true }
+                        onMap = { hideKeyboard(); mapSpot = null; showMap = true },
                     )
                 }
-            } else {
+            } else if (!searching) {
                 val score = vm.collectionProgress.weeklyScoreAverage(LocalDate.now(ChallengeRound.seoul))
                 Column(
                     Modifier.fillMaxWidth().weight(1f)
                         .clip(RoundedCornerShape(28.dp)).background(challengeBackground)
-                        .padding(top = 12.dp, bottom = 18.dp),
+                        .padding(top = 4.dp, bottom = 18.dp),
                 ) {
                     ChallengeHomeHero(vm.recordedDistanceMeters, score, Modifier.weight(1f))
                     Text(
@@ -197,8 +268,13 @@ internal fun ChallengeHomeScreen(vm: ChallengeViewModel) {
             }
         }
     }
+    if (canChoose) selectedPlace?.let { place ->
+        ResolvedDestinationDialog(vm, place) { selectedPlace = null }
+    }
     if (canChoose) navigationQuery?.let { keyword ->
-        DestinationSearchDialog(vm, keyword) { navigationQuery = null }
+        DestinationSearchDialog(vm, keyword, openUnresolvedInNavigation = shortcutLookup) {
+            navigationQuery = null
+        }
     }
     if (searching && editingShortcuts && canChoose) {
         DestinationShortcutEditor(vm, shortcutId) { editingShortcuts = false }
@@ -219,7 +295,7 @@ private fun DestinationShortcutRow(
     ) {
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             shortcuts.forEach { item ->
-                DestinationShortcutButton(item.label, item.place?.name.orEmpty(),
+                DestinationShortcutButton(item.label, item.searchQuery,
                     when(item.id) { "home" -> Icons.Filled.Home; "work" -> Icons.Filled.Work; else -> Icons.Outlined.LocationOn }, enabled) { onOpen(item.id) }
             }
         }
@@ -265,27 +341,35 @@ private fun DestinationShortcutButton(
 private fun ChallengeHomeHero(distanceMeters: Long, score: Int?, modifier: Modifier) {
     val distance = String.format(Locale.KOREA, "%,.1f km", distanceMeters / 1_000.0)
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val imageHeight = minOf(maxHeight * .80f, maxWidth * .39f)
+        val imageHeight = minOf(maxHeight * .90f, maxWidth * .39f)
         val diameter = minOf(maxHeight * .53f, maxWidth * .21f)
         val imageBottomPadding = 8.dp
         // Align each circle’s lower curve with the palm in the fitted mascot image.
         val palmHeight = imageHeight * .62f
         val statTop = (maxHeight - imageBottomPadding - palmHeight - diameter + 12.dp)
             .coerceIn(0.dp, maxHeight - diameter)
-        val statOffset = minOf(imageHeight * .565f, (maxWidth - diameter) / 2)
+        val imageTop = maxHeight - imageBottomPadding - imageHeight
+        val lift = minOf(64.dp, minOf(statTop, imageTop) - 24.dp).coerceAtLeast(0.dp)
+        // Grow around the palms so the circles keep their vertical position.
+        val extraHeight = minOf(imageHeight * .16f, lift / .62f, (imageTop - lift - 24.dp) / .38f)
+            .coerceAtLeast(0.dp)
+        val mascotHeight = imageHeight + extraHeight
+        val mascotTop = imageTop - lift - extraHeight * .38f
+        val statOffset = minOf(mascotHeight * .565f, (maxWidth - diameter) / 2)
         ChallengeHomeStat(
             "무사즈와", distance, "달렸어요",
-            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop).size(diameter)
+            Modifier.align(Alignment.TopCenter).offset(x = -statOffset, y = statTop - lift).size(diameter)
         )
         ChallengeHomeStat(
             "이번 주 안전점수", score?.let { "${it}점" } ?: "—",
             if (score == null) "아직 기록이 없어요" else "일별 최고점 평균",
-            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop).size(diameter)
+            Modifier.align(Alignment.TopCenter).offset(x = statOffset, y = statTop - lift).size(diameter)
         )
         Image(
             painterResource(R.drawable.musaz_challenge_home),
             contentDescription = null,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = imageBottomPadding).size(imageHeight * 1.5f, imageHeight),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = mascotTop)
+                .size(mascotHeight * 1.5f, mascotHeight),
             contentScale = ContentScale.Fit
         )
     }
@@ -316,19 +400,12 @@ private fun ChallengeHomeStat(title: String, value: String, caption: String, mod
 @Composable
 private fun DestinationSuggestions(
     recent: List<String>,
-    query: String,
     enabled: Boolean,
     onSearch: (String) -> Unit,
     onSpot: (Destination) -> Unit,
     onMap: () -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val keyword = query.trim()
-        if (keyword.isNotEmpty()) {
-            item {
-                DestinationRow("“$keyword” 검색", "목적지 검색", Icons.Outlined.Search, enabled) { onSearch(keyword) }
-            }
-        }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -372,6 +449,7 @@ private fun DestinationRow(
     detail: String?,
     icon: ImageVector,
     enabled: Boolean,
+    stackedDetail: Boolean = false,
     onClick: () -> Unit
 ) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(14.dp), color = Color.White) {
@@ -381,9 +459,18 @@ private fun DestinationRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(icon, contentDescription = null, tint = H1Style.Ink, modifier = Modifier.size(21.dp))
-            Text(title, Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Medium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            detail?.let { Text(it, color = H1Style.Muted, fontSize = 14.sp) }
+            if (stackedDetail) {
+                Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    if (!detail.isNullOrBlank()) Text(detail, color = H1Style.Muted, fontSize = 14.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else {
+                Text(title, Modifier.weight(1f), fontSize = 18.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                detail?.let { Text(it, color = H1Style.Muted, fontSize = 14.sp) }
+            }
             Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = H1Style.Muted)
         }
     }
