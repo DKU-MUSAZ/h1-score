@@ -32,6 +32,43 @@ import java.util.UUID
 class CollectionRecordingTest {
     @get:Rule val ui = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun platinumWeeklyQuestPersistsAndAwardsOnlyOnceInDemo() {
+        val app = isolatedApplication()
+        lateinit var model: ChallengeViewModel
+        val goal = RankBadgeGoal.CONSISTENT_FLOW
+        val monday = LocalDate.now(ChallengeRound.seoul).with(DayOfWeek.MONDAY)
+        ui.runOnIdle {
+            app.prefs.edit().apply {
+                RankBadgeGoal.entries.filter { it.tier < ai.musaz.h1score.core.RankTier.PLATINUM }
+                    .forEach { putInt("rank-badges-demo-${it.id}", it.targetDays) }
+                putStringSet("rank-badges-demo-${goal.id}-weeks",
+                    setOf(monday.minusWeeks(1).toString(), monday.minusWeeks(2).toString()))
+            }.commit()
+            model = ChallengeViewModel(app).apply {
+                receiveVehicle(parkedVehicle())
+                switchSource()
+            }
+            assertEquals(2, model.rankBadgeProgress.days(goal))
+            val now = Instant.now()
+            model.accept(ChallengeRound("주간 순위 검증", now.minusSeconds(60), now.plusSeconds(120)))
+            model.runDemo()
+        }
+        ui.waitUntil(40_000) { model.report != null }
+        ui.runOnIdle {
+            assertEquals(3, model.rankBadgeProgress.days(goal))
+            assertEquals(20, model.badgeMileageEarned)
+            assertEquals(120, model.balance)
+            val restored = ChallengeViewModel(app)
+            assertEquals(0, restored.rankBadgeProgress.days(goal))
+            restored.openCompletedResult()
+            assertEquals(3, restored.rankBadgeProgress.days(goal))
+            assertEquals(3, restored.rankBadgeProgress.weeksByGoal[goal]?.size)
+            assertEquals(120, restored.balance)
+            restored.openCompletedResult()
+            assertEquals(120, restored.balance)
+        }
+    }
+
     @Test fun spotProgressRequiresMatchingArrivalAndParkAndPersistsOnce() {
         val app = isolatedApplication()
         ui.runOnIdle {
@@ -73,6 +110,7 @@ class CollectionRecordingTest {
             val lastMonday = LocalDate.now(ChallengeRound.seoul).minusWeeks(1).with(DayOfWeek.MONDAY)
             val previous = CollectionProgress((0L..3L).associate { lastMonday.plusDays(it) to 92 })
             val editor = app.prefs.edit().putInt("rank-badges-demo-${RankBadgeGoal.FIRST_RANK.id}", 4)
+                .putInt("rank-badges-demo-${RankBadgeGoal.CALM_START.id}", 4)
             CollectionProgressStore(app.prefs).writeChallenge(editor, true, previous)
             editor.commit()
             model = ChallengeViewModel(app)
@@ -91,14 +129,14 @@ class CollectionRecordingTest {
             assertEquals(5, store.read(true).challengeDays)
             assertEquals(0, store.read(false).challengeDays)
             assertEquals(100, model.earned)
-            assertEquals(45, model.badgeMileageEarned)
-            assertEquals(145, model.balance)
-            assertEquals(45, CompletedDriveStore(app.prefs).read()?.badgeMileage)
+            assertEquals(30, model.badgeMileageEarned) // attendance 15 + first rank 5 + calm start 10
+            assertEquals(130, model.balance)
+            assertEquals(30, CompletedDriveStore(app.prefs).read()?.badgeMileage)
             val restored = ChallengeViewModel(app)
             assertEquals(0, restored.balance)
             restored.openCompletedResult()
-            assertEquals(45, restored.badgeMileageEarned)
-            assertEquals(145, restored.balance)
+            assertEquals(30, restored.badgeMileageEarned)
+            assertEquals(130, restored.balance)
             assertTrue(model.recordedDistanceMeters >= 9_000)
             assertEquals(model.recordedDistanceMeters, app.prefs.getLong("recorded-distance-demo", 0))
             assertEquals(0L, app.prefs.getLong("recorded-distance-live", 0))

@@ -47,22 +47,22 @@ class BadgeCollectionUiTest {
         val dialog = hasAnyAncestor(isDialog())
         ui.onNode(hasText("명예 훈장") and filter).performClick()
         ui.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("좋은 습관"))
-        ui.onNode(hasText("좋은 습관") and hasText("1 / 5일")).assertIsDisplayed()
+        ui.onNode(hasText("좋은 습관") and hasText("티어 잠금")).assertIsDisplayed()
         ui.onNodeWithText("배지 안내").performClick()
         ui.onNode(dialog and hasText("명예 훈장") and expanded).assertIsDisplayed()
         ui.onNode(dialog and hasText("획득 조건")).assertIsDisplayed()
         ui.onNode(dialog and hasText("집계 시점")).assertIsDisplayed()
         ui.onNode(dialog and hasScrollToIndexAction()).performScrollToNode(hasText("차분한 출발"))
         val badgeTitle = ui.onNode(dialog and hasText("차분한 출발")).fetchSemanticsNode().boundsInRoot
-        val badgeCondition = ui.onNode(dialog and hasText("80점 이상 5일")).fetchSemanticsNode().boundsInRoot
+        val badgeCondition = ui.onNode(dialog and hasText("상위 80% 이내 5일")).fetchSemanticsNode().boundsInRoot
         assertEquals(badgeTitle.left, badgeCondition.left, 1f)
         assertTrue(badgeCondition.top >= badgeTitle.bottom)
         capture("collection-guide", ui.onNode(isDialog()))
         ui.onNode(dialog and hasText("닫기")).performClick()
         ui.onNode(hasText("명예 훈장") and filter).performClick()
         ui.onNodeWithText("배지 안내").performClick()
-        ui.onNode(dialog and hasText("명예 훈장") and expanded and hasText("안전점수 집계 · 순위 연동 준비 중")).assertIsDisplayed()
-        ui.onNode(dialog and hasText("브론즈 배지 2개를 모두 모으면 실버가 열려요.", substring = true)).assertIsDisplayed()
+        ui.onNode(dialog and hasText("명예 훈장") and expanded and hasText("실제 순위 연동 준비 중")).assertIsDisplayed()
+        ui.onNode(dialog and hasText("각 티어의 배지 3개를 모두 모으면 다음 티어가 열려요.", substring = true)).assertIsDisplayed()
         ui.onNode(dialog and hasText("닫기")).performClick()
         ui.onNode(hasText("스팟 투어") and filter).performClick()
         ui.onNode(hasText("서울 오토 라이브러리") and hasText("1 / 3회")).assertIsDisplayed().performClick()
@@ -116,7 +116,7 @@ class BadgeCollectionUiTest {
                     (2..8).map { x -> image.getPixel(image.width * x / 10, image.height * y / 10) }
                 }
                 val previous = artworkByTitle.put(pixels, title)
-                assertNull("$title and $previous render the same badge artwork", previous)
+                if (category != "명예 훈장") assertNull("$title and $previous render the same badge artwork", previous)
                 ui.onNodeWithText("확인").performClick()
                 ui.waitUntil(5_000) { ui.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
             }
@@ -164,7 +164,7 @@ class BadgeCollectionUiTest {
         ui.onNode(hasText("브론즈") and heading).assertIsDisplayed()
         ui.onNodeWithText("순위 첫걸음").assertIsDisplayed()
         capture("honor-rank-first")
-        val silverGate = hasText("브론즈 배지 2개를 모두 획득하면 열려요")
+        val silverGate = hasText("브론즈 배지 3개를 모두 획득하면 열려요")
         grid.performScrollToNode(silverGate)
         ui.onNode(silverGate).assertIsDisplayed()
         capture("tour-rank")

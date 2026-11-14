@@ -62,7 +62,6 @@ private const val WelcomeBadgeTitle = "당신도 이제 무사즈!"
 private const val LiveRankPending = "실제 순위 연동 준비 중"
 private enum class BadgeFamily(val title: String, val accent: Color, val tint: Color, val filterIcon: ImageVector) {
     PARTICIPATION("챌린지", H1Style.Ink, H1Style.PaleMint, Icons.Outlined.Flag),
-    SCORE("안전운전", Color(0xFF4472AB), Color(0xFFEDF3FB), Icons.Outlined.VerifiedUser),
     RANK("랭킹", Color(0xFFAA792A), Color(0xFFFCF4E4), Icons.Outlined.Leaderboard),
     ROUTINE("주행 습관", Color(0xFF8270AC), Color(0xFFF2EEF8), Icons.Outlined.CalendarMonth),
     SPOT("스팟투어", H1Style.Ink, H1Style.PaleMint, Icons.Outlined.Map)
@@ -85,13 +84,12 @@ private data class CollectionBadge(
     val unit: String = "일",
     val explanation: String = "조건을 채우면 컬렉션에 보관돼요.",
     val rankGoal: RankBadgeGoal? = null,
-    val minimumScore: Int = 0,
     val spot: SpotTour? = null
 ) {
     val category: BadgeCategory get() = when (family) {
         BadgeFamily.PARTICIPATION -> BadgeCategory.ATTENDANCE
-        BadgeFamily.ROUTINE -> if (id == "routine-score") BadgeCategory.HONOR else BadgeCategory.ATTENDANCE
-        BadgeFamily.SCORE, BadgeFamily.RANK -> BadgeCategory.HONOR
+        BadgeFamily.ROUTINE -> BadgeCategory.ATTENDANCE
+        BadgeFamily.RANK -> BadgeCategory.HONOR
         BadgeFamily.SPOT -> BadgeCategory.SPOT
     }
     val tier: RankTier? get() = rankGoal?.tier
@@ -100,11 +98,10 @@ private data class CollectionBadge(
 
     fun recordedProgress(collection: CollectionProgress, ranks: RankBadgeProgress): Int = when (family) {
         BadgeFamily.PARTICIPATION -> collection.challengeDays
-        BadgeFamily.SCORE -> collection.scoreDays(minimumScore)
         BadgeFamily.ROUTINE -> when (id) {
             "routine-week" -> collection.bestWeekDays
             "routine-month" -> collection.challengeWeeks
-            else -> collection.scoreWeeks(90)
+            else -> error("Unknown attendance badge: $id")
         }
         BadgeFamily.RANK -> requireNotNull(rankGoal).let { if (ranks.isUnlocked(it.tier)) ranks.days(it) else 0 }
         BadgeFamily.SPOT -> collection.visits(requireNotNull(spot))
@@ -112,8 +109,10 @@ private data class CollectionBadge(
 }
 
 private fun rankBadge(goal: RankBadgeGoal, title: String, reward: Int, @DrawableRes artwork: Int) =
-    CollectionBadge(goal.id, BadgeFamily.RANK, title, "상위 ${goal.topPercent}% 이내 ${goal.targetDays}일",
-        goal.targetDays, reward, 0, artwork, rankGoal = goal)
+    CollectionBadge(goal.id, BadgeFamily.RANK, title,
+        if (goal.weekly) "서로 다른 ${goal.targetDays}개 주에서 상위 ${goal.topPercent}% 이내"
+        else "상위 ${goal.topPercent}% 이내 ${goal.targetDays}일",
+        goal.targetDays, reward, 0, artwork, unit = if (goal.weekly) "주" else "일", rankGoal = goal)
 
 private fun spotBadge(spot: SpotTour, title: String, @DrawableRes artwork: Int) =
     CollectionBadge(spot.id, BadgeFamily.SPOT, title, "${spot.destinationName} · ${SpotTour.REQUIRED_VISITS}회 방문",
@@ -129,37 +128,31 @@ private val collectionBadges = listOf(
         15, 25, 12, R.drawable.musaz_attendance_join_15),
     CollectionBadge("join-20", BadgeFamily.PARTICIPATION, "함께 달린 무사즈", "유효한 대회 20일 참여",
         20, 40, 12, R.drawable.musaz_attendance_join_20),
-    CollectionBadge("score-80-5", BadgeFamily.SCORE, "차분한 출발", "80점 이상 5일",
-        5, 10, 10, R.drawable.musaz_badge_score_80_5, minimumScore = 80),
-    CollectionBadge("score-80-10", BadgeFamily.SCORE, "안정적인 흐름", "80점 이상 10일",
-        10, 15, 10, R.drawable.musaz_badge_score_80_10, minimumScore = 80),
-    CollectionBadge("score-90-5", BadgeFamily.SCORE, "좋은 습관", "90점 이상 5일",
-        5, 15, 6, R.drawable.musaz_badge_score_90_5, minimumScore = 90),
-    CollectionBadge("score-90-10", BadgeFamily.SCORE, "믿음직한 드라이버", "90점 이상 10일",
-        10, 25, 6, R.drawable.musaz_badge_score_90_10, minimumScore = 90),
-    CollectionBadge("score-95-5", BadgeFamily.SCORE, "정교한 운전", "95점 이상 5일",
-        5, 35, 2, R.drawable.musaz_badge_score_95_5, minimumScore = 95),
     rankBadge(RankBadgeGoal.FIRST_RANK, "순위 첫걸음", 5, R.drawable.musaz_trophy_bronze_raised_large),
+    rankBadge(RankBadgeGoal.CALM_START, "차분한 출발", 10, R.drawable.musaz_trophy_bronze_raised_large),
     rankBadge(RankBadgeGoal.RANK_ADAPTED, "순위 적응 완료", 10, R.drawable.musaz_badge_rank_80),
     rankBadge(RankBadgeGoal.MIDFIELD, "중위권 돌파", 15, R.drawable.musaz_trophy_silver_raised_large),
     rankBadge(RankBadgeGoal.UPPER_RANK, "꾸준한 상위권", 20, R.drawable.musaz_badge_rank_30),
+    rankBadge(RankBadgeGoal.STEADY_FLOW, "안정적인 흐름", 15, R.drawable.musaz_trophy_silver_raised_large),
     rankBadge(RankBadgeGoal.TOP_REGULAR, "상위권 단골", 25, R.drawable.musaz_trophy_gold_raised_large),
+    rankBadge(RankBadgeGoal.GOOD_HABIT, "좋은 습관", 15, R.drawable.musaz_trophy_gold_raised_large),
+    rankBadge(RankBadgeGoal.TRUSTED_DRIVER, "믿음직한 드라이버", 25, R.drawable.musaz_trophy_gold_raised_large),
     rankBadge(RankBadgeGoal.ACE, "무사즈 에이스", 35, R.drawable.musaz_trophy_platinum_raised_large),
+    rankBadge(RankBadgeGoal.PRECISE_DRIVER, "정교한 운전", 35, R.drawable.musaz_trophy_platinum_raised_large),
+    rankBadge(RankBadgeGoal.CONSISTENT_FLOW, "꾸준한 좋은 흐름", 20, R.drawable.musaz_trophy_platinum_raised_large),
     CollectionBadge("routine-week", BadgeFamily.ROUTINE, "주간 루틴", "한 주에 서로 다른 3일 참여",
         3, 10, 3, R.drawable.musaz_attendance_routine_week,
         explanation = "월요일~일요일 중 3일에 참여하면 달성해요."),
     CollectionBadge("routine-month", BadgeFamily.ROUTINE, "네 주의 동행", "서로 다른 4개 주에 참여",
         4, 20, 3, R.drawable.musaz_attendance_routine_month, unit = "주"),
-    CollectionBadge("routine-score", BadgeFamily.ROUTINE, "꾸준한 좋은 흐름", "서로 다른 3개 주에서 90점 이상",
-        3, 20, 2, R.drawable.musaz_badge_routine_score, unit = "주"),
     spotBadge(SpotTour.SEOUL, "서울 오토 라이브러리", R.drawable.musaz_badge_spot_seoul),
     spotBadge(SpotTour.GOYANG, "고양 모빌리티 탐험", R.drawable.musaz_badge_spot_goyang),
     spotBadge(SpotTour.BUSAN, "부산 디자인 산책", R.drawable.musaz_badge_spot_busan)
 )
 
 private val rankExample = RankBadgeProgress(mapOf(
-    RankBadgeGoal.FIRST_RANK to 5, RankBadgeGoal.RANK_ADAPTED to 10,
-    RankBadgeGoal.MIDFIELD to 5, RankBadgeGoal.UPPER_RANK to 4
+    RankBadgeGoal.FIRST_RANK to 5, RankBadgeGoal.CALM_START to 5, RankBadgeGoal.RANK_ADAPTED to 10,
+    RankBadgeGoal.MIDFIELD to 5, RankBadgeGoal.UPPER_RANK to 4, RankBadgeGoal.STEADY_FLOW to 6
 ))
 
 internal fun newlyEarnedCollectionBadges(
@@ -317,8 +310,7 @@ internal fun newlyEarnedCollectionBadges(
                     }
                 }
                 val groups = if (category == BadgeCategory.HONOR) {
-                    RankTier.entries.map { tier -> tier to cards.filter { it.tier == tier } } +
-                        listOf(null to cards.filter { it.rankGoal == null })
+                    RankTier.entries.map { tier -> tier to cards.filter { it.tier == tier } }
                 } else {
                     listOf(null to cards)
                 }
@@ -507,7 +499,7 @@ internal fun newlyEarnedCollectionBadges(
                     items(sections, key = { it.name }) { category ->
                         val open = expanded == category
                         val status = when {
-                            category == BadgeCategory.HONOR && !demo -> "안전점수 집계 · 순위 연동 준비 중"
+                            category == BadgeCategory.HONOR && !demo -> LiveRankPending
                             demo -> "시연 집계"
                             else -> "실제 기록 집계"
                         }
@@ -547,7 +539,7 @@ internal fun newlyEarnedCollectionBadges(
 @Composable private fun BadgeGuideDetails(category: BadgeCategory, demo: Boolean) {
     val timing = when (category) {
         BadgeCategory.ATTENDANCE -> "회차 안에 유효한 챌린지를 완료하고 주차하면 참여일이 반영돼요. 하루에 한 번 인정하며, 한 주는 월요일부터 일요일까지예요."
-        BadgeCategory.HONOR -> "안전점수 배지는 유효한 챌린지를 완료하고 주차하면 집계해요. ‘꾸준한 좋은 흐름’은 서로 다른 3개 주에서 90점 이상을 기록하면 달성해요."
+        BadgeCategory.HONOR -> "유효한 챌린지의 최종 순위로 하루 한 번 집계해요. ‘꾸준한 좋은 흐름’은 플래티넘이 열린 뒤 서로 다른 3개 주에서 상위 10% 이내에 들면 달성해요. 한 주는 월요일부터 일요일까지예요."
         BadgeCategory.SPOT -> if (demo) "배지 상세에서 시연 방문을 세 번 추가하면 시연 마일리지가 적립돼요."
             else "방문 기록 시작 → Pleos 내비 목적지 도착 → 주차. 장소마다 하루 한 번 기록돼요."
     }
@@ -560,7 +552,7 @@ internal fun newlyEarnedCollectionBadges(
                 fontSize = 20.sp, lineHeight = 28.sp, color = BadgeSecondaryText)
         }
         if (category == BadgeCategory.HONOR) {
-            Text("브론즈 배지 2개를 모두 모으면 실버가 열려요. 각 티어가 열린 뒤의 순위 기록부터 하루 한 번 집계해요.",
+            Text("각 티어의 배지 3개를 모두 모으면 다음 티어가 열려요. 다음 티어의 집계는 이후 참여한 경기부터 시작해요.",
                 fontSize = 20.sp, lineHeight = 28.sp, color = BadgeSecondaryText)
             if (!demo) Text("순위 배지: $LiveRankPending", fontSize = 20.sp, color = BadgeSecondaryText)
         }

@@ -427,7 +427,11 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
     private fun readRankBadgeProgress(key: String): RankBadgeProgress = RankBadgeProgress(
         RankBadgeGoal.entries.associateWith { prefs.getInt("$key-${it.id}", 0) },
         prefs.getStringSet("$key-days", emptySet()).orEmpty()
-            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
+            .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet(),
+        RankBadgeGoal.entries.filter { it.weekly }.associateWith { goal ->
+            prefs.getStringSet("$key-${goal.id}-weeks", emptySet()).orEmpty()
+                .mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
+        }
     )
 
     private fun recordRankBadgeProgress(editor: SharedPreferences.Editor, arrivedAt: Instant, rank: Int, participants: Int) {
@@ -438,6 +442,9 @@ class ChallengeViewModel @JvmOverloads constructor(app: Application,
         editor.apply {
             RankBadgeGoal.entries.forEach { putInt("$key-${it.id}", updated.days(it)) }
             putStringSet("$key-days", updated.countedDays.map { it.toString() }.toSet())
+            RankBadgeGoal.entries.filter { it.weekly }.forEach { goal ->
+                putStringSet("$key-${goal.id}-weeks", updated.weeksByGoal[goal].orEmpty().map { it.toString() }.toSet())
+            }
         }
         rankBadgeProgress = updated
     }
