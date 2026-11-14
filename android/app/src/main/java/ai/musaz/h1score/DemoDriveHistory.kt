@@ -62,6 +62,18 @@ internal fun demoHistoryExamples(today: LocalDate = LocalDate.now(ChallengeRound
         example(1, 17, "단국대학교 죽전캠퍼스", 420.0, 23.95, 13.40, decelerations = 1),
         example(2, 8, "서울숲", 2_000.0, 20.0, 10.0, accelerations = 1, missedTurnSignal = true),
         example(3, 13, "현대 모터스튜디오 고양", 0.0, 25.0, 15.0),
+        example(4, 14, "잠실종합운동장", 0.0, 0.0, 0.0).let { drive ->
+            drive.copy(
+                session = drive.session.copy(phase = Phase.DISQUALIFIED),
+                report = drive.report.copy(score = null, valid = false, validDistanceM = 2_400.0,
+                    turns = emptyList()),
+                ranking = emptyList(), earned = 0, badgeMileage = 0,
+                outcome = DriveOutcome.DISQUALIFIED,
+                beltFailureReason = BeltFailureReason.DRIVER_UNBUCKLED,
+                participationDay = today.minusDays(4).toString(),
+                recognition = ResultRecognition.DISQUALIFIED,
+            )
+        },
         example(5, 11, "올림픽공원", 2_500.0, 18.75, 9.25, accelerations = 2, decelerations = 1),
         example(8, 16, "판교 테크노밸리", 900.0, 22.75, 11.00, missedTurnSignal = true),
         example(10, 10, "광교호수공원", 0.0, 25.0, 12.0, decelerations = 1),
