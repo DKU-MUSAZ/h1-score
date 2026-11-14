@@ -5,12 +5,24 @@ import ai.musaz.h1score.core.*
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal enum class DriveOutcome(val label: String) {
+    COMPLETED("완료"), DISQUALIFIED("실격"), UNVERIFIABLE("확인 불가"),
+}
+
+internal enum class BeltFailureReason(val label: String) {
+    DRIVER_UNBUCKLED("운전석 안전벨트 미착용"),
+    PASSENGER_UNBUCKLED("조수석 안전벨트 미착용"),
+    TELEMETRY_UNAVAILABLE("안전벨트·주행 데이터 확인 불가"),
+}
+
 internal data class CompletedDrive(
     val session: ChallengeSession, val report: ScoreReport, val name: String,
     val demo: Boolean, val ranking: List<RankedEntry>, val earned: Int, val missedDeadline: Boolean,
     val completedAtEpochMs: Long? = null,
     val scoringVersion: String = report.scoringVersion,
     val badgeMileage: Int = 0,
+    val outcome: DriveOutcome = DriveOutcome.COMPLETED,
+    val beltFailureReason: BeltFailureReason? = null,
 )
 
 internal class CompletedDriveStore(private val prefs: SharedPreferences) {
@@ -74,6 +86,7 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             put("venueId", s.venueId); put("competitionId", s.competitionId)
             put("name", value.name); put("demo", value.demo); put("earned", value.earned); put("missedDeadline", value.missedDeadline)
             put("badgeMileage", value.badgeMileage)
+            put("outcome", value.outcome.name); put("beltFailureReason", value.beltFailureReason?.name)
             put("completedAtEpochMs", value.completedAtEpochMs); put("scoringVersion", value.scoringVersion)
             put("score", r.score); put("compliance", r.compliance); put("smoothness", r.smoothness)
             put("distance", r.validDistanceM); put("coverage", r.coverage); put("valid", r.valid)
@@ -116,9 +129,12 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
         val rows = j.getJSONArray("ranking")
         val events = j.optJSONArray("events")
         val version = j.optString("scoringVersion", LEGACY_SCORING_VERSION)
+        val outcome = DriveOutcome.entries.firstOrNull { it.name == j.optString("outcome") }
+            ?: if (j.has("outcome")) DriveOutcome.UNVERIFIABLE else DriveOutcome.COMPLETED
         CompletedDrive(
             session = ChallengeSession(
-                j.getString("id"), j.getString("destinationId"), j.getDouble("initialDistanceM"), Phase.FINISHED,
+                j.getString("id"), j.getString("destinationId"), j.getDouble("initialDistanceM"),
+                if (outcome == DriveOutcome.DISQUALIFIED) Phase.DISQUALIFIED else Phase.FINISHED,
                 venueId = j.optString("venueId").takeIf { it.isNotEmpty() },
                 competitionId = j.optString("competitionId").takeIf { it.isNotEmpty() },
             ),
@@ -169,6 +185,8 @@ internal class CompletedDriveStore(private val prefs: SharedPreferences) {
             completedAtEpochMs = if (j.has("completedAtEpochMs") && !j.isNull("completedAtEpochMs")) j.getLong("completedAtEpochMs") else null,
             scoringVersion = version,
             badgeMileage = j.optInt("badgeMileage"),
+            outcome = outcome,
+            beltFailureReason = BeltFailureReason.entries.firstOrNull { it.name == j.optString("beltFailureReason") },
         )
     }.getOrNull()
 
