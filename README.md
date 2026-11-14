@@ -6,6 +6,14 @@
 
 [실행 안내](docs/prototype/START-HERE.md) · [카카오맵 설정](docs/prototype/ENVIRONMENT.md) · [이용 규칙 및 구현 명세](docs/specifications/안운잘부-이용규칙-및-구현명세.md) · [기존 시연 영상](docs/media/demo-walkthrough.mp4)
 
+## APK 다운로드 및 파일 위치
+
+**[제출 APK 다운로드 · MUSAZ_Anwunjalbu_release.apk](https://github.com/DKU-MUSAZ/h1-score/releases/download/contest-submission/MUSAZ_Anwunjalbu_release.apk)**
+
+- **GitHub Release:** [contest-submission](https://github.com/DKU-MUSAZ/h1-score/releases/tag/contest-submission)
+- **직접 빌드한 Debug APK 위치:** `android/app/build/outputs/apk/debug/app-debug.apk` (저장소 루트 기준)
+- Debug APK는 아래 빌드 명령으로 생성되는 로컬 파일입니다. 다운로드하려면 위 Release 첨부 파일을 사용하세요.
+
 <img src="docs/media/readme/01-home.png" alt="Pleos에서 실행한 안운잘부 챌린지 홈" width="100%">
 
 ## 왜 안운잘부인가요?
@@ -116,7 +124,50 @@
 
 현재 위치를 기준으로 찾는 마일리지 사용처와 **목적지**를 기준으로 매칭하는 챌린지 개최지는 서로 다른 기능입니다. 주변 정비소 탐색이 이미 동작하는 기능으로 오해되지 않도록 구현 범위를 명시합니다.
 
-## 실행하기
+## 테스트 환경 및 필요한 설정
+
+개발 및 실행 화면 캡처에 사용한 환경입니다. 에뮬레이터의 AVD 이름과 시스템 빌드 정보, `adb shell wm size`·`wm density`로 확인했습니다.
+
+| 항목 | 사용 환경 |
+| --- | --- |
+| 개발 OS | Windows · Android Studio |
+| Pleos Connect 에뮬레이터 버전 | **v2.1.0** (AVD: `Pleos_Connect_v2.1.0`) |
+| 시스템 빌드 | `RELEASE.release_connect_v2.1.0 test-keys` |
+| Android / CPU | Android 14 (API 34) / x86_64 |
+| 화면 규격 | **2560 × 1440 px, 가로형 16:9, 160 dpi** |
+| 화면 범위 | 차량 패널·하단 시스템 UI를 포함한 전체 디스플레이 기준. 앱은 오른쪽 앱 영역에 표시 |
+| 빌드 환경 | JDK 21, Gradle Wrapper 8.11.1, Android SDK Platform 35 |
+| 앱 SDK 설정 | compileSdk 35 / targetSdk 34 / minSdk 28 |
+| Pleos SDK | Vehicle 2.3.2 / NaviHelper 3.0.5 / TextToSpeech 3.3.1 |
+
+소스에서 빌드할 때는 `android/local.properties`의 `sdk.dir`을 자신의 Android SDK 경로로 설정합니다. 실제 지도와 일반 장소 검색을 테스트하려면 다음 설정이 필요합니다.
+
+| 설정 | 용도 |
+| --- | --- |
+| `KAKAO_NATIVE_APP_KEY` | 카카오 지도 표시용 네이티브 앱 키 |
+| `KAKAO_LOCAL_REST_API_KEY` | 내부 검증용 Debug 빌드의 일반 장소 검색 |
+| 카카오 Android 앱 등록 | 패키지명 `ai.musaz.h1score`와 설치할 APK의 서명 키 해시 등록 |
+| 네트워크·위치 | 에뮬레이터 인터넷 연결, 위치 기능 활성화 및 앱의 위치 권한 허용 |
+| 챌린지 참가 조건 | Pleos 차량 신호 연결, 주차(P) 상태와 운전석 안전벨트 착용 확인 |
+
+실제 키는 저장소에 올리지 않고 로컬에서 설정합니다. 상세 설정과 키가 없는 경우의 동작은 [환경 설정 안내](docs/prototype/ENVIRONMENT.md)를 참고하세요.
+
+## 실행 방법
+
+### 배포 APK로 실행
+
+1. 위 Release에서 `MUSAZ_Anwunjalbu_release.apk`를 다운로드합니다.
+2. Android Studio의 Device Manager에서 **Pleos Connect v2.1.0** 에뮬레이터를 실행합니다.
+3. APK를 받은 폴더에서 다음 명령으로 설치합니다. `adb`는 Android SDK Platform-Tools에 포함됩니다.
+
+```text
+adb devices
+adb install -r "MUSAZ_Anwunjalbu_release.apk"
+```
+
+4. Pleos 앱 목록에서 **안운잘부**를 실행하고 최초 안내와 필요한 권한 설정을 진행합니다. 기기가 여러 대 연결되어 있으면 `adb -s <기기 ID> install -r ...`로 대상을 지정합니다.
+
+### 소스에서 빌드·실행
 
 1. Android Studio에서 저장소의 `android/` 폴더를 엽니다.
 2. Android SDK와 프로젝트 의존성을 준비하고 Gradle Sync를 실행합니다.
@@ -137,6 +188,14 @@ macOS·Linux에서 빌드:
 cd android
 ./gradlew :core:test :app:assembleDebug
 ```
+
+빌드 완료 후 Android Studio의 Run 버튼으로 실행하거나, 저장소 루트에서 다음 명령으로 Debug APK를 설치한 뒤 Pleos 앱 목록에서 **안운잘부**를 실행합니다.
+
+```text
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 차량 신호 조작 및 테스트
 
 Pleos Virtual Console:
 
