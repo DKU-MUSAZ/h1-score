@@ -5,6 +5,7 @@ import ai.musaz.h1score.core.Phase
 import ai.musaz.h1score.core.Sample
 import ai.musaz.h1score.core.ScoreEngine
 import android.app.Application
+import android.car.VehicleGear
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -32,29 +33,37 @@ class SourceScoringSessionTest {
         apps.forEach { it.prefs.edit().clear().commit() }
     }
 
-    @Test fun unbucklingPermanentlyDisqualifiesReservedAndRecordingSessions() {
+    @Test fun movingUnbuckledPermanentlyDisqualifiesAndPreservesReservedAndRecordingSessions() {
         ui.runOnIdle {
             for (recording in listOf(false, true)) {
                 val app = application()
                 val vm = model(app)
                 startChallenge(vm, recording)
-                val before = app.prefs.all.toMap()
                 val now = SystemClock.elapsedRealtime()
-                vm.receiveVehicle(vm.live.copy(belt = false, beltAt = now), now)
+                val moving = vm.live.copy(belt = false, beltAt = now, gearCode = VehicleGear.GEAR_DRIVE,
+                    gearAt = now, motionSpeedMps = 1.0, motionSpeedAt = now, gearPark = false,
+                    passengerOccupied = false, passengerOccupiedAt = now)
+                vm.receiveVehicle(moving, now)
+                assertEquals(if (recording) Phase.RECORDING else Phase.RESERVED, vm.phase)
+                vm.receiveVehicle(moving.copy(beltAt = now + 500, motionSpeedAt = now + 500,
+                    gearAt = now + 500, passengerOccupiedAt = now + 500), now + 500)
                 assertEquals(Phase.DISQUALIFIED, vm.phase)
                 assertFalse(vm.activeJourney)
-                assertNull(vm.report)
+                assertNull(vm.report!!.score)
+                assertFalse(vm.report!!.valid)
                 assertTrue(vm.ranking.isEmpty())
                 assertEquals(0, vm.earned)
                 assertTrue(vm.pendingBadges.isEmpty())
 
                 // Re-buckling and a later arrival cannot restore or settle the disqualified trip.
-                vm.receiveVehicle(vm.live.copy(belt = true, beltAt = now, arrived = true,
-                    arrivedAt = Instant.now(), remainingM = 0.0), now)
+                val saved = CompletedDriveStore(app.prefs).readAll().single()
+                assertEquals(DriveOutcome.DISQUALIFIED, saved.outcome)
+                assertEquals(BeltFailureReason.DRIVER_UNBUCKLED, saved.beltFailureReason)
+                vm.receiveVehicle(vm.live.copy(belt = true, beltAt = now + 750, arrived = true,
+                    arrivedAt = Instant.now(), remainingM = 0.0), now + 750)
                 assertEquals(Phase.DISQUALIFIED, vm.phase)
                 assertEquals(0, vm.completed)
-                assertTrue(CompletedDriveStore(app.prefs).readAll().isEmpty())
-                assertEquals(before, app.prefs.all)
+                assertEquals(listOf(saved), CompletedDriveStore(app.prefs).readAll())
             }
         }
     }
@@ -65,6 +74,8 @@ class SourceScoringSessionTest {
             startChallenge(vm, recording = true)
             val now = SystemClock.elapsedRealtime()
             vm.receiveVehicle(vm.live.copy(belt = false, beltAt = now - 2_501,
+                gearCode = VehicleGear.GEAR_DRIVE, gearAt = now, gearPark = false,
+                motionSpeedMps = 1.0, motionSpeedAt = now, passengerOccupiedAt = now,
                 beltWarningOnAt = null, beltWarningOffAt = null), now)
             assertEquals(Phase.RECORDING, vm.phase)
             vm.receiveVehicle(vm.live.copy(belt = null, beltAt = now), now)
@@ -154,7 +165,9 @@ class SourceScoringSessionTest {
     private fun parked(): LiveVehicle {
         val now = SystemClock.elapsedRealtime()
         return LiveVehicle(speedMps = 0.0, speedAt = now, gearPark = true,
-            uxRestricted = false, belt = true, beltAt = now)
+            uxRestricted = false, belt = true, beltAt = now, gearCode = VehicleGear.GEAR_PARK,
+            gearAt = now, motionSpeedMps = 0.0, motionSpeedAt = now,
+            passengerOccupied = false, passengerOccupiedAt = now)
     }
 
     private fun application() = TestApplication(ui.activity.applicationContext).also(apps::add)

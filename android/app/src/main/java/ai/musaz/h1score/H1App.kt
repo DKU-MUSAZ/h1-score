@@ -355,8 +355,8 @@ internal fun LiveRouteChallengeDialog(
 ) {
     Modal("$venueName 대회 참가", "내비 목적지 · $destinationName", onDismiss) {
         Text("현재 목적지로 길 안내를 계속하면서 이 챌린지에 참가해요.", color = Muted)
-        if (!vm.live.beltConditionMet) Text("운전석 벨트 상태를 확인해 주세요.", color = Muted)
-        RoundConsent(vm, "동의하고 참가", vm.live.beltConditionMet) { round ->
+        if (!vm.live.beltConditionMet) Text("출발 전 운전석과 탑승한 조수석의 벨트를 착용해 주세요.", color = Muted)
+        RoundConsent(vm, "동의하고 참가", true) { round ->
             vm.accept(round)
             if (vm.activeJourney) onDismiss()
         }
@@ -475,7 +475,7 @@ internal fun LiveRouteChallengeDialog(
             color=Muted,modifier=Modifier.padding(bottom=18.dp))
         val beltRequired = !vm.demo && !vm.live.beltConditionMet
         if (beltRequired) {
-            Text(if(vm.live.belt == false) "운전석 벨트를 착용하면 참가할 수 있어요."
+            Text(if(vm.live.belt == false) "예약은 가능해요. 출발 전 운전석과 탑승한 조수석의 벨트를 착용해 주세요."
                 else "운전석 벨트 상태를 확인하고 있어요.",color=Ink,
                 modifier=Modifier.fillMaxWidth().background(PaleMint,RoundedCornerShape(12.dp)).padding(14.dp))
             Spacer(Modifier.height(12.dp))
@@ -489,7 +489,7 @@ internal fun LiveRouteChallengeDialog(
             }
             Spacer(Modifier.height(8.dp))
         }
-        val canKeepRoute = place == null && !vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup && !beltRequired
+        val canKeepRoute = place == null && !vm.demo && vm.hasLiveRoute && vm.destinationInChallengeGroup
         if (canKeepRoute) {
             Text("현재 목적지는 ${vm.matchedVenue?.name} 대회에 배정돼요.", color=Green)
         }
@@ -498,7 +498,7 @@ internal fun LiveRouteChallengeDialog(
             isHangang || place != null -> "참가 예약 · 내비 시작"
             else -> "시연 참가 예약"
         }
-        RoundConsent(vm, action, !beltRequired,
+        RoundConsent(vm, action, true,
             if (canKeepRoute) {
                 { round -> onDismiss(); vm.accept(round) }
             } else null) {
@@ -582,6 +582,7 @@ internal fun LiveRouteChallengeDialog(
         Row(Modifier.fillMaxWidth().padding(top=17.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(if(waiting) "기록 시작까지 ${"%.1f".format(((vm.remainingM-10000)/1000).coerceAtLeast(0.0))} km" else if(arrived) "결과 공개 대기" else "안전한 곳까지 평소처럼 운전해 주세요",color=Color(0xFFAFBDCC),fontSize=13.sp)
             Spacer(Modifier.weight(1f))
+            if (vm.parked && disqualified) Button(onClick=vm::openCompletedResult) { Text("실격 기록 보기") }
             if(vm.parked && vm.activeJourney) {
                 TextButton(onClick=vm::cancel) { Text("참가 취소",color=Color(0xFFAFBDCC)) }
                 if(vm.consoleTest) Button(onClick=vm::finishConsoleTest) { Text("콘솔 시험 종료") }

@@ -26,8 +26,9 @@ data class ChallengeSession(
             return copy(phase = Phase.RECORDING, startCount = startCount + 1)
         return this
     }
-    fun enforceBelt(buckled: Boolean?): ChallengeSession =
-        if (buckled == false && phase in listOf(Phase.RESERVED, Phase.RECORDING))
+    fun enforceBelt(decision: BeltDecision): ChallengeSession =
+        if (decision.verdict == BeltVerdict.DISQUALIFIED &&
+            phase in listOf(Phase.RESERVED, Phase.RECORDING, Phase.AWAITING_PARK))
             copy(phase = Phase.DISQUALIFIED) else this
     fun changeDestination(next: String) = if (next != destinationId) copy(phase = Phase.CANCELLED) else this
 }

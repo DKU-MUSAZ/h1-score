@@ -232,10 +232,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
             }
             return
         }
-        if (!live.beltConditionMet) {
-            notice = "운전석 벨트를 착용한 뒤 참가해 주세요"
-            return
-        }
         if (!beginService()) return
         activeRound = round
         requestedVenueId = venue.venueId
@@ -500,8 +496,14 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private var demoJob: Job? = null
     private val samples = mutableListOf<Sample>()
     private val turnDetector = TurnDetector()
+    private val beltMonitor = SeatBeltMonitor()
+    internal var beltDecision by mutableStateOf(BeltDecision(BeltVerdict.SAFE)); private set
     private var lastTurnAt = 0L
-    private fun currentReport() = ScoreEngine.evaluate(samples, turnDetector.events)
+    private fun currentReport(): ScoreReport {
+        val measured=ScoreEngine.evaluate(samples, turnDetector.events)
+        return if (!demo && !consoleTest && (beltDecision.hadUnverifiedMotion ||
+                beltDecision.verdict != BeltVerdict.SAFE)) measured.copy(score=null, valid=false) else measured
+    }
     private var lastReportAt = 0L
     private var recordingStartedAtNanos: Long? = null
     private var uiVisible = false
@@ -509,18 +511,24 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     val consoleTestAvailable get() = BuildConfig.DEBUG && isEmulator
     val parked get() = if (demo) !demoMoving && (live.parked || (isEmulator && live.gearPark == null && live.uxRestricted != true && (live.speedMps ?: 0.0) < .1)) else live.parked
     private var completedDestinationName: String? = null
-    val destinationName get() = completedDestinationName?.takeIf { phase == Phase.FINISHED } ?:
+    val destinationName get() = completedDestinationName?.takeIf { phase in listOf(Phase.FINISHED, Phase.DISQUALIFIED) } ?:
         if (consoleTest) "콘솔 입력 테스트 · 시험 제한속도 ${consoleSessionLimitKph}km/h"
         else if(demo) selected.name else live.destination ?: "내비게이션 목적지를 설정해 주세요"
     val distanceKm get() = if(demo) selected.distanceKm else (live.remainingM ?: 0.0)/1000
     val phase get() = session?.phase ?: Phase.IDLE
     val activeJourney get() = phase in listOf(Phase.RESERVED,Phase.RECORDING,Phase.AWAITING_PARK)
-    val resultUnlocked get() = phase == Phase.FINISHED && parked
+    val resultUnlocked get() = phase in listOf(Phase.FINISHED, Phase.DISQUALIFIED) && parked
 
     init {
         viewModelScope.launch { connection.flow.collect { receiveVehicle(it) } }
         // Preserve every source sample; the UI state stream may conflate fast updates.
         viewModelScope.launch { connection.samples.collect { receiveSample(it) } }
+        viewModelScope.launch {
+            while (true) {
+                delay(250)
+                if (!demo && !consoleTest && activeJourney) checkSeatBelts(live, SystemClock.elapsedRealtime())
+            }
+        }
     }
 
     internal fun receiveVehicle(next: LiveVehicle, receivedAt: Long = SystemClock.elapsedRealtime()) {
@@ -644,6 +652,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     internal fun openCompletedResult() {
         selectedHistoryRecord=null
         if(activeJourney) { screen=Screen.JOURNEY; return }
+        completedDriveStore.read()?.takeIf { it.session.id == session?.id && it.outcome != DriveOutcome.COMPLETED }
+            ?.let { selectedHistoryRecord=it }
         if(report == null || phase != Phase.FINISHED) {
             completedDriveStore.read()?.let { saved ->
                 connection.setConsoleCapture(false)
@@ -655,6 +665,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
                 collectionProgress=collectionStore.read(demo)
                 recordedDistanceMeters=prefs.getLong(distanceKey(demo),0)
                 session=saved.session; report=saved.report; ranking=saved.ranking
+                if (saved.outcome != DriveOutcome.COMPLETED) selectedHistoryRecord=saved
                 earned=saved.earned; missedDeadline=saved.missedDeadline
                 badgeMileageEarned = saved.badgeMileage
                 completedDestinationName=saved.name
@@ -718,7 +729,6 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         if(!demo && (live.destinationId == null || live.remainingM == null || SystemClock.elapsedRealtime()-live.destinationAt > 10_000)) {
             notice="내비게이션 목적지 정보를 기다리고 있어요"; return
         }
-        if(!demo && !live.beltConditionMet) { notice="운전석 벨트 상태를 확인한 뒤 참가해 주세요"; return }
         if(!beginService()) return
         activeRound = round
         demoRoundStart = maxOf(Instant.now(), round.opensAt)
@@ -736,6 +746,8 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         liveArrivalAt = null
         connection.drainPendingSamples()
         samples.clear(); turnDetector.reset(); lastTurnAt=0; lastReportAt=0; recordingStartedAtNanos=null
+        beltMonitor.reset(); beltDecision=beltMonitor.decision
+        connection.drainBeltObservations()
         progressReport=ScoreEngine.evaluate(emptyList())
         report=null; ranking=emptyList(); earned=0; pendingBadges=emptyList()
         badgeMileageEarned = 0
@@ -743,6 +755,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         session=ChallengeSession(UUID.randomUUID().toString(),if(demo) selected.name else live.destinationId!!,remainingM, venueId=assigned.venue.id, competitionId="${assigned.venue.id}:${activeRound?.opensAt}").accept(true)
         recordingStartedAtNanos = if (!demo && phase == Phase.RECORDING) SystemClock.elapsedRealtimeNanos() else null
         screen=Screen.JOURNEY
+        if (!demo) checkSeatBelts(live, SystemClock.elapsedRealtime())
     }
     fun cancel() {
         if(!parked) return
@@ -783,21 +796,7 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     private fun consumeLive(v: LiveVehicle, now: Long) {
         val s=session ?: return
         if(!activeJourney) return
-        val beltChecked = s.enforceBelt(v.freshBelt(now))
-        if (beltChecked.phase == Phase.DISQUALIFIED) {
-            session=beltChecked
-            report=null
-            progressReport=ScoreEngine.evaluate(emptyList())
-            ranking=emptyList()
-            earned=0
-            badgeMileageEarned = 0
-            pendingBadges=emptyList()
-            recordingStartedAtNanos=null
-            turnDetector.interrupt()
-            notice="안전벨트 미착용으로 실격 처리했어요. 이번 점수·순위·보상은 지급하지 않습니다."
-            endService()
-            return
-        }
+        if (!checkSeatBelts(v, now)) return
         if (s.phase == Phase.AWAITING_PARK) {
             if (v.parked) {
                 session = s.update(0.0, true, true)
@@ -836,6 +835,10 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
     }
     private fun finish(arrivedAt: Instant?) {
         val s=session ?: return
+        if (!demo && beltDecision.hadUnverifiedMotion) {
+            saveBeltOutcome(s, DriveOutcome.UNVERIFIABLE, BeltFailureReason.TELEMETRY_UNAVAILABLE)
+            return
+        }
         val r=currentReport()
         progressReport=r
         selectedHistoryRecord=null
@@ -896,6 +899,40 @@ class ChallengeViewModel(app: Application): AndroidViewModel(app) {
         completed++
         screen=Screen.RESULT
         if (parked) RecordingService.notifyResult(getApplication())
+        endService()
+    }
+    private fun checkSeatBelts(v: LiveVehicle, now: Long): Boolean {
+        if (!activeJourney) return false
+        connection.drainBeltObservations().forEach { beltMonitor.accept(it) }
+        beltDecision=beltMonitor.accept(v.beltObservation(now))
+        if (beltDecision.hadUnverifiedMotion || beltDecision.verdict != BeltVerdict.SAFE)
+            progressReport=progressReport.copy(score=null, valid=false)
+        if (beltDecision.verdict != BeltVerdict.DISQUALIFIED) return true
+        val failed=requireNotNull(session).enforceBelt(beltDecision)
+        val reason=if (beltDecision.seat == BeltSeat.PASSENGER) BeltFailureReason.PASSENGER_UNBUCKLED
+            else BeltFailureReason.DRIVER_UNBUCKLED
+        saveBeltOutcome(failed, DriveOutcome.DISQUALIFIED, reason)
+        return false
+    }
+
+    /** A belt-invalid journey is persisted before service shutdown; it never reaches settlement. */
+    private fun saveBeltOutcome(s: ChallengeSession, outcome: DriveOutcome, reason: BeltFailureReason) {
+        val name=destinationName
+        drainRecordingSamples(SystemClock.elapsedRealtimeNanos())
+        val invalid=currentReport().copy(score=null, valid=false)
+        session=s
+        completedDestinationName=name
+        report=invalid; progressReport=invalid
+        ranking=emptyList(); earned=0; badgeMileageEarned=0; pendingBadges=emptyList()
+        recordingStartedAtNanos=null; turnDetector.interrupt()
+        val saved=CompletedDrive(s, invalid, name, demo, emptyList(), 0, false,
+            completedAtEpochMs=System.currentTimeMillis(), outcome=outcome, beltFailureReason=reason)
+        completedDriveStore.save(saved)
+        completedDrives=completedDriveStore.readAll()
+        selectedHistoryRecord=saved
+        notice=if (outcome == DriveOutcome.DISQUALIFIED) "${reason.label}으로 실격 처리됐어요. 주차 후 내 기록에서 확인해 주세요."
+            else "주행 중 안전벨트 확인에 필요한 정보가 부족해 이번 점수·순위·보상을 집계하지 않았어요."
+        if (parked) { screen=Screen.RESULT; RecordingService.notifyResult(getApplication()) }
         endService()
     }
     override fun onCleared() { demoJob?.cancel(); connection.setConsoleCapture(false); connection.stop(); voice.stop() }
